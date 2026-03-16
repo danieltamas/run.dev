@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>run.dev — AI-native local dev environment</title>
+  <meta name="description" content="One dashboard for all your local services. Automatic domains, SSL, reverse proxy, process management, and AI crash diagnosis. Single binary. Zero config.">
+  <meta name="theme-color" content="#0a0a0a">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="run.dev — AI-native local dev environment">
+  <meta property="og:description" content="One dashboard for all your local services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://getrun.dev">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="run.dev — AI-native local dev environment">
+  <meta name="twitter:description" content="One dashboard for all your local services. Single binary. Zero config.">
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --bg-card: #111111;
+      --bg-code: #1a1a1a;
+      --border: #222222;
+      --text: #e0e0e0;
+      --text-dim: #777777;
+      --text-muted: #555555;
+      --cyan: #56d4dd;
+      --green: #4ade80;
+      --yellow: #facc15;
+      --red: #f87171;
+      --purple: #a78bfa;
+      --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ──────────────────────────────────────── */
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 48px;
+    }
+
+    section {
+      padding: 140px 0;
+    }
+
+    /* ── Hero ────────────────────────────────────────── */
+
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 60px 24px;
+    }
+
+    .hero-label {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      font-family: var(--font-mono);
+      font-size: clamp(40px, 8vw, 72px);
+      font-weight: 700;
+      letter-spacing: -2px;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+
+    .hero h1 .dot { color: var(--cyan); }
+
+    .hero .tagline {
+      font-size: clamp(18px, 3vw, 22px);
+      color: var(--text-dim);
+      max-width: 500px;
+      margin-bottom: 48px;
+    }
+
+    /* ── Install box ─────────────────────────────────── */
+
+    .install-box {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 28px;
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .install-box:hover {
+      border-color: var(--cyan);
+    }
+
+    .install-box .prompt {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 15px;
+      user-select: none;
+    }
+
+    .install-box code {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      color: var(--cyan);
+    }
+
+    .install-box .copy-hint {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+
+    .install-box:hover .copy-hint {
+      color: var(--text-dim);
+    }
+
+    .hero-sub {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .hero-sub a {
+      color: var(--text-dim);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .hero-sub a:hover { color: var(--cyan); }
+
+    /* ── Scroll indicator ────────────────────────────── */
+
+    .scroll-hint {
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: var(--font-mono);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.8; }
+    }
+
+    /* ── Terminal demo ───────────────────────────────── */
+
+    .terminal-wrapper {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    .terminal {
+      background: #0c0c0c;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      overflow: hidden;
+      width: 100%;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.55;
+      box-shadow: 0 32px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .terminal-bar {
+      background: #161616;
+      padding: 14px 20px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .terminal-dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-body {
+      padding: 0;
+      color: var(--text-dim);
+    }
+
+    .terminal-header {
+      display: flex;
+      gap: 32px;
+      padding: 28px 36px 20px;
+      align-items: flex-start;
+    }
+
+    .terminal-logo {
+      font-family: var(--font-mono);
+      white-space: pre;
+      line-height: 1.1;
+      font-size: 17px;
+      font-weight: bold;
+      color: var(--cyan);
+      flex-shrink: 0;
+    }
+
+    .terminal-info {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text-muted);
+      padding-top: 4px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .terminal-info .t-status {
+      font-size: 15px;
+      margin-bottom: 12px;
+    }
+
+    .terminal-info .t-shortcuts {
+      line-height: 1.6;
+    }
+
+    .terminal-info .t-author {
+      margin-top: 12px;
+    }
+
+    .terminal-table {
+      font-family: var(--font-mono);
+      white-space: pre;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 0 36px 32px;
+    }
+
+    .t-cyan { color: var(--cyan); }
+    .t-green { color: var(--green); }
+    .t-yellow { color: var(--yellow); }
+    .t-red { color: var(--red); }
+    .t-dim { color: var(--text-muted); }
+    .t-white { color: #ffffff; }
+
+    /* ── Pain section ────────────────────────────────── */
+
+    .pain {
+      text-align: center;
+    }
+
+    .pain h2 {
+      font-size: 40px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+
+    .pain p {
+      font-size: 20px;
+      color: var(--text-dim);
+      max-width: 580px;
+      margin: 0 auto 48px;
+      line-height: 1.6;
+    }
+
+    .pain-list {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 48px;
+    }
+
+    .pain-item {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 24px;
+      font-family: var(--font-mono);
+      font-size: 16px;
+      color: var(--text-muted);
+      text-decoration: line-through;
+    }
+
+    .pain .nah {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--cyan);
+    }
+
+    /* ── Features ────────────────────────────────────── */
+
+    .features {
+      padding: 160px 0;
+    }
+
+    .features .container {
+      max-width: 1200px;
+    }
+
+    .features h2 {
+      font-size: 56px;
+      font-weight: 700;
+      margin-bottom: 80px;
+      text-align: center;
+      color: #ffffff;
+      letter-spacing: -1px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 64px 56px;
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+
+    .feature-card:hover {
+      border-color: #333;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    }
+
+    .feature-card .icon {
+      font-size: 56px;
+      margin-bottom: 28px;
+    }
+
+    .feature-card h3 {
+      font-size: 28px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+
+    .feature-card p {
+      font-size: 20px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    .feature-card code {
+      font-family: var(--font-mono);
+      font-size: 17px;
+      color: var(--cyan);
+      background: var(--bg-code);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    /* ── How it works ────────────────────────────────── */
+
+    .how-it-works {
+      text-align: center;
+      padding: 160px 0;
+    }
+
+    .how-it-works .container {
+      max-width: 1200px;
+    }
+
+    .how-it-works h2 {
+      font-size: 56px;
+      font-weight: 700;
+      margin-bottom: 80px;
+      color: #ffffff;
+      letter-spacing: -1px;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      margin: 0 auto;
+      text-align: left;
+    }
+
+    .step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 52px 44px;
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+
+    .step:hover {
+      border-color: #333;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    }
+
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 64px;
+      font-weight: 800;
+      color: var(--cyan);
+      line-height: 1;
+      min-width: 56px;
+      opacity: 0.7;
+    }
+
+    .step h3 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+
+    .step p {
+      font-size: 17px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    .step code {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--cyan);
+      background: var(--bg-code);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    /* ── AI section ──────────────────────────────────── */
+
+    .ai-section {
+      text-align: center;
+      padding: 160px 0 180px;
+      background: linear-gradient(180deg, var(--bg) 0%, #0e0e0e 50%, var(--bg) 100%);
+    }
+
+    .ai-section .container {
+      max-width: 1200px;
+    }
+
+    .ai-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .ai-logo svg {
+      width: 56px;
+      height: 56px;
+      flex-shrink: 0;
+    }
+
+    .ai-logo span {
+      font-size: 15px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .ai-section h2 {
+      font-size: 56px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      color: #ffffff;
+      letter-spacing: -1px;
+    }
+
+    .ai-section > .container > .ai-desc {
+      font-size: 20px;
+      color: var(--text-dim);
+      max-width: 640px;
+      margin: 0 auto 80px;
+      line-height: 1.7;
+    }
+
+    .ai-features {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 28px;
+    }
+
+    .ai-feat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 52px 40px;
+      text-align: left;
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+
+    .ai-feat:hover {
+      border-color: #333;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    }
+
+    .ai-feat .ai-feat-icon {
+      font-size: 40px;
+      margin-bottom: 24px;
+    }
+
+    .ai-feat h3 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 14px;
+    }
+
+    .ai-feat p {
+      font-size: 17px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    .ai-feat code {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--cyan);
+      background: var(--bg-code);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .ai-note {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin-top: 72px;
+      font-family: var(--font-mono);
+    }
+
+    /* ── CTA ─────────────────────────────────────────── */
+
+    .cta {
+      text-align: center;
+      padding: 160px 24px;
+    }
+
+    .cta h2 {
+      font-size: 48px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 16px;
+      letter-spacing: -1px;
+    }
+
+    .cta p {
+      font-size: 20px;
+      color: var(--text-dim);
+      margin-bottom: 48px;
+    }
+
+    .cta .install-box {
+      margin: 0 auto 20px;
+    }
+
+    .cta-links {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-top: 24px;
+    }
+
+    .cta-links a {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .cta-links a:hover { color: var(--cyan); }
+
+    /* ── Footer ──────────────────────────────────────── */
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    footer p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    footer a {
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+
+    footer a:hover { color: var(--cyan); }
+
+    /* ── Responsive ──────────────────────────────────── */
+
+    @media (max-width: 768px) {
+      .feature-grid { grid-template-columns: 1fr; }
+      .ai-features { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; }
+      .install-box { flex-wrap: wrap; }
+      .pain-list { flex-direction: column; align-items: center; }
+      section { padding: 80px 0; }
+      .how-it-works, .ai-section, .features { padding: 80px 0; }
+      .how-it-works h2, .ai-section h2, .features h2 { font-size: 32px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Hero ──────────────────────────────────────── -->
+
+  <section class="hero">
+    <div class="hero-label">AI-native local dev environment</div>
+    <h1>run<span class="dot">.</span>dev</h1>
+    <p class="tagline">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
+
+    <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
+      <span class="prompt">$</span>
+      <code>curl -fsSL https://getrun.dev/install.sh | bash</code>
+      <span class="copy-hint">copy</span>
+    </div>
+    <p class="hero-sub">macOS &amp; Linux &middot; Rust binary &middot; <a href="https://github.com/nicepkg/run.dev">view source</a></p>
+
+    <div class="scroll-hint">scroll</div>
+  </section>
+
+  <!-- ── Pain ──────────────────────────────────────── -->
+
+  <section class="pain">
+    <div class="container">
+      <h2>You know the drill</h2>
+      <p>6 terminal tabs. 6 start commands. Forget which port is which. "Address already in use." Every. Single. Morning.</p>
+
+      <div class="pain-list">
+        <div class="pain-item">MAMP Pro</div>
+        <div class="pain-item">nginx.conf</div>
+        <div class="pain-item">docker-compose.yml</div>
+        <div class="pain-item">/etc/hosts by hand</div>
+        <div class="pain-item">mkcert + openssl</div>
+      </div>
+
+      <div class="nah">Nah.</div>
+    </div>
+  </section>
+
+  <!-- ── Terminal demo ─────────────────────────────── -->
+
+  <section>
+    <div class="terminal-wrapper">
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-header">
+            <div class="terminal-logo">██████╗ ██╗   ██╗███╗   ██╗  ██████╗ ███████╗██╗   ██╗
+██╔══██╗██║   ██║████╗  ██║  ██╔══██╗██╔════╝██║   ██║
+██████╔╝██║   ██║██╔██╗ ██║  ██║  ██║█████╗  ██║   ██║
+██╔══██╗██║   ██║██║╚██╗██║  ██║  ██║██╔══╝  ╚██╗ ██╔╝
+██║  ██║╚██████╔╝██║ ╚████║  ██████╔╝███████╗ ╚████╔╝
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝
+
+<span class="t-dim" style="font-size:13px;">Daniel Tamas
+hello@danieltamas.com</span></div>
+            <div class="terminal-info">
+              <div class="t-status"><span class="t-green">3/4 services</span> &nbsp;😎 &nbsp;<span class="t-white">vibing</span></div>
+              <div class="t-shortcuts">
+                <span class="t-dim">[a] add service &nbsp;[n] new project &nbsp;[e] rename</span><br>
+                <span class="t-dim">[s] start &nbsp;[x] stop &nbsp;[p] pause routing &nbsp;[r] restart</span><br>
+                <span class="t-dim">[/] ask the AI anything</span><br>
+                <span class="t-dim">[q] quit</span>
+              </div>
+              <div class="t-author"><span class="t-green">2 projects</span> &nbsp;configured &nbsp;<span class="t-dim">v0.1.0</span></div>
+            </div>
+          </div>
+          <div class="terminal-table"><span class="t-dim">© 2026 Daniel Tamas — danieltamas.com</span>
+<span class="t-dim">projects ──────────────────────────────────────────────────────────────────────────────</span>
+<span class="t-dim">        service                            url                          local            mem    cpu</span>
+
+<span class="t-dim">▼</span> <span class="t-white">WAM</span>  <span class="t-dim">2 services</span>  ✨
+<span class="t-dim">│</span> <span class="t-green">●</span> <span class="t-green">win.wam.app</span>                          <span class="t-cyan">https://win.wam.app</span>          <span class="t-dim">localhost:5111</span>    <span class="t-dim">42M   0.0%</span>
+<span class="t-dim">│</span> <span class="t-green">●</span> <span class="t-green">api.wam.app</span>                          <span class="t-cyan">https://api.wam.app</span>          <span class="t-dim">localhost:4000</span>    <span class="t-dim">38M   2.1%</span>
+<span class="t-dim">▼</span> <span class="t-white">side-project</span>  <span class="t-dim">1 service</span>  😌
+<span class="t-dim">│</span> <span class="t-red">✗</span> <span class="t-red">backend</span>        <span class="t-yellow">bro, backend is ded. port 3000 is already taken.</span>
+<span class="t-dim">│</span>                  <span class="t-dim">press [f] to let me fix it</span>
+
+<span class="t-dim">──────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="t-dim">/ ask claude something...</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features ──────────────────────────────────── -->
+
+  <section class="features">
+    <div class="container">
+      <h2>Everything you need, nothing you don't</h2>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">🌐</div>
+          <h3>Automatic local domains</h3>
+          <p>Add a project, get <code>myapp.local</code> with wildcard subdomains. Managed via <code>/etc/hosts</code> — no DNS hacks.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🔒</div>
+          <h3>Zero-config SSL</h3>
+          <p>Self-signed certs generated in pure Rust. HTTPS on every local domain, with green padlock. No mkcert, no OpenSSL.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🔀</div>
+          <h3>Reverse proxy</h3>
+          <p>SNI-based HTTPS routing. <code>api.myapp.local</code> maps to <code>localhost:4000</code>. Hot-updatable, no restarts.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📊</div>
+          <h3>Live resource stats</h3>
+          <p>CPU% and memory per service, updated every 2 seconds. Know exactly what's eating your RAM.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🔍</div>
+          <h3>Smart project scanning</h3>
+          <p>Point it at a folder. It finds <code>package.json</code>, <code>Cargo.toml</code>, <code>go.mod</code> — and suggests the right start command.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">💀</div>
+          <h3>Personality-driven UX</h3>
+          <p>Mood system reflects health at a glance. Crash messages that actually tell you what happened — with suggested fixes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── How it works ──────────────────────────────── -->
+
+  <section class="how-it-works">
+    <div class="container">
+      <h2>Up and running in 30 seconds</h2>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <h3>Install</h3>
+            <p>One curl command. Downloads the binary, sets up the hosts helper, configures port forwarding. Done.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <h3>Add a project</h3>
+            <p>Press <code>[a]</code>, type a name. You get a <code>.local</code> domain with SSL certs generated instantly.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <h3>Point at your code</h3>
+            <p>Press <code>[a]</code> again, enter the folder path. Run.dev scans it, detects the framework, suggests the start command and port.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div>
+            <h3>That's it</h3>
+            <p>Your service is running on a pretty HTTPS URL. Add more services, more projects. They all show up in one dashboard.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── AI section ────────────────────────────────── -->
+
+  <section class="ai-section">
+    <div class="container">
+      <div class="ai-logo">
+        <svg viewBox="0 0 46 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M27.88 0L14.56 28.8h5.6l2.88-6.56h12.96L38.88 28.8h5.6L31.16 0H27.88Zm1.6 8.56l4.36 10.4h-8.72l4.36-10.4ZM0 28.8h5.6V0H0v28.8Z" fill="#D4A27F"/>
+        </svg>
+        <span>Powered by Claude</span>
+      </div>
+      <h2>Claude Code built in</h2>
+      <p>Run.dev integrates with Claude Code, Anthropic's local CLI agent. When things break, Claude reads the logs and tells you why. Everything stays on your machine.</p>
+
+      <div class="ai-features">
+        <div class="ai-feat">
+          <div class="ai-feat-icon">🔍</div>
+          <h3>Crash diagnosis</h3>
+          <p>A service dies. Claude reads the stderr, understands the error, and explains what went wrong and how to fix it.</p>
+        </div>
+        <div class="ai-feat">
+          <div class="ai-feat-icon">💬</div>
+          <h3>Debug sessions</h3>
+          <p>Press <code>/</code>, ask anything. Claude knows your project structure, routes, and ports. Answers in context.</p>
+        </div>
+        <div class="ai-feat">
+          <div class="ai-feat-icon">⚡</div>
+          <h3>Auto-fix</h3>
+          <p>Port conflicts, missing modules, dead dependencies. Press <code>[f]</code> and run.dev handles the common stuff.</p>
+        </div>
+      </div>
+
+      <p class="ai-note">Optional — works perfectly without it. Disable with --no-ai.</p>
+    </div>
+  </section>
+
+  <!-- ── Final CTA ─────────────────────────────────── -->
+
+  <section class="cta">
+    <h2>Stop babysitting config files</h2>
+    <p>One binary. All your services. Real domains with SSL. In 30 seconds.</p>
+
+    <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
+      <span class="prompt">$</span>
+      <code>curl -fsSL https://getrun.dev/install.sh | bash</code>
+      <span class="copy-hint">copy</span>
+    </div>
+
+    <div class="cta-links">
+      <a href="https://github.com/nicepkg/run.dev">GitHub</a>
+      <a href="https://github.com/nicepkg/run.dev/blob/main/src/docs/ARCHITECTURE.md">Docs</a>
+      <a href="https://github.com/nicepkg/run.dev/issues">Issues</a>
+    </div>
+  </section>
+
+  <!-- ── Footer ────────────────────────────────────── -->
+
+  <footer>
+    <p>Built by <a href="mailto:hello@danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/nicepkg/run.dev">Source</a></p>
+  </footer>
+
+  <!-- ── Copy to clipboard ─────────────────────────── -->
+
+  <script>
+    function copyInstall(el) {
+      var text = 'curl -fsSL https://getrun.dev/install.sh | bash';
+      var hint = el.querySelector('.copy-hint');
+      navigator.clipboard.writeText(text).then(function() {
+        hint.textContent = 'copied!';
+        hint.style.color = '#4ade80';
+        setTimeout(function() {
+          hint.textContent = 'copy';
+          hint.style.color = '';
+        }, 2000);
+      });
+    }
+  </script>
+
+</body>
+</html>

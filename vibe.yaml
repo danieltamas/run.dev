@@ -1,0 +1,9 @@
+name: vibe.dev
+domain: vibe.dev.local
+services:
+  vibe.dev:
+    path: ./
+    command: cargo run
+    port: 8080
+    subdomain: ''
+    env: {}

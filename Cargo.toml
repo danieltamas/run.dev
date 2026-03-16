@@ -1,0 +1,30 @@
+[package]
+name = "rundev"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+ratatui = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+sysinfo = "0.31"
+reqwest = { version = "0.12", features = ["json"], optional = true }
+dirs = "5"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+tokio-stream = "0.1"
+futures = "0.3"
+libc = "0.2"
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+rcgen = "0.13"
+shlex = "1"
+
+[features]
+default = ["ai"]
+ai = ["reqwest"]
