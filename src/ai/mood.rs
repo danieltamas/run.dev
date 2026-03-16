@@ -101,7 +101,7 @@ pub fn calculate_mood(processes: &[ManagedProcess]) -> Mood {
 
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
-    PortInUse,
+    PortInUse(u16),
     ModuleNotFound(String),
     SyntaxError(String, String),
     ConnectionRefused(String, u16),
@@ -117,7 +117,23 @@ pub struct CrashInfo {
 
 pub fn categorize_error(stderr: &str) -> ErrorKind {
     if stderr.contains("EADDRINUSE") || stderr.contains("address already in use") {
-        ErrorKind::PortInUse
+        // Extract port from patterns like ":::8898", "port 8898", ":8898"
+        let port = stderr.lines().find_map(|line| {
+            if let Some(pos) = line.rfind(":::") {
+                line[pos + 3..].split(|c: char| !c.is_ascii_digit()).next()
+                    .and_then(|s| s.parse::<u16>().ok())
+            } else if let Some(pos) = line.find("port:") {
+                line[pos + 5..].trim().split(|c: char| !c.is_ascii_digit()).next()
+                    .and_then(|s| s.parse::<u16>().ok())
+            } else if let Some(pos) = line.rfind(':') {
+                line[pos + 1..].split(|c: char| !c.is_ascii_digit()).next()
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .filter(|&p| p > 0)
+            } else {
+                None
+            }
+        }).unwrap_or(0);
+        ErrorKind::PortInUse(port)
     } else if stderr.contains("Cannot find module") || stderr.contains("ModuleNotFoundError") {
         let module = extract_module_name(stderr);
         ErrorKind::ModuleNotFound(module)
@@ -137,10 +153,13 @@ pub fn categorize_error(stderr: &str) -> ErrorKind {
 pub fn crash_message(service: &str, error: &CrashInfo) -> String {
     let kind = categorize_error(&error.stderr_tail);
     match kind {
-        ErrorKind::PortInUse => format!(
-            "bro, {} is ded. port {} is already taken.\ni know what's wrong. press [f] to let me fix it",
-            service, error.port
-        ),
+        ErrorKind::PortInUse(port) => {
+            let p = if port > 0 { port } else { error.port };
+            format!(
+                "bro, {} is ded. port {} is already taken.\ni know what's wrong. press [f] to let me fix it",
+                service, p
+            )
+        }
         ErrorKind::ModuleNotFound(module) => format!(
             "{} crashed. missing module: {}.\nrun `npm install` maybe? press [f] and i'll do it",
             service, module
@@ -175,7 +194,10 @@ pub enum FixAction {
 
 pub fn auto_fix_action(error: &ErrorKind, proc: &ManagedProcess) -> Option<FixAction> {
     match error {
-        ErrorKind::PortInUse => Some(FixAction::KillPort(proc.port)),
+        ErrorKind::PortInUse(port) => {
+            let p = if *port > 0 { *port } else { proc.port };
+            Some(FixAction::KillPort(p))
+        }
         ErrorKind::ModuleNotFound(_) => Some(FixAction::RunCommand {
             cmd: "npm install".to_string(),
             cwd: proc.working_dir.clone(),
@@ -373,13 +395,13 @@ mod tests {
     #[test]
     fn categorize_port_in_use() {
         let kind = categorize_error("Error: listen EADDRINUSE :::3000");
-        assert!(matches!(kind, ErrorKind::PortInUse));
+        assert!(matches!(kind, ErrorKind::PortInUse(3000)));
     }
 
     #[test]
     fn categorize_port_in_use_alt_message() {
         let kind = categorize_error("address already in use");
-        assert!(matches!(kind, ErrorKind::PortInUse));
+        assert!(matches!(kind, ErrorKind::PortInUse(_)));
     }
 
     #[test]

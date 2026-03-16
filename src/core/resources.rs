@@ -7,7 +7,7 @@
 //! # Author
 //! Daniel Tamas <hello@danieltamas.com>
 
-use sysinfo::{Pid, System};
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::core::process::SharedProcess;
 
@@ -18,21 +18,32 @@ pub struct ResourceMonitor {
 impl ResourceMonitor {
     pub fn new() -> Self {
         Self {
-            system: System::new_all(),
+            system: System::new(),
         }
     }
 
     pub async fn update(&mut self, processes: &[SharedProcess]) {
-        self.system.refresh_all();
+        // Collect PIDs first, then refresh only those processes — not the entire system
+        let mut pids: Vec<(usize, Pid)> = Vec::new();
+        for (i, proc) in processes.iter().enumerate() {
+            let p = proc.lock().await;
+            if let Some(pid) = p.pid {
+                pids.push((i, Pid::from(pid as usize)));
+            }
+        }
 
-        for proc in processes {
-            let pid = {
-                let p = proc.lock().await;
-                p.pid
-            };
+        if !pids.is_empty() {
+            let pid_refs: Vec<Pid> = pids.iter().map(|(_, pid)| *pid).collect();
+            self.system.refresh_processes(ProcessesToUpdate::Some(&pid_refs));
+        }
 
-            if let Some(pid) = pid {
-                let (cpu, mem) = self.get_stats(pid);
+        for (i, proc) in processes.iter().enumerate() {
+            if let Some((_, sysinfo_pid)) = pids.iter().find(|(idx, _)| *idx == i) {
+                let (cpu, mem) = if let Some(process) = self.system.process(*sysinfo_pid) {
+                    (process.cpu_usage(), process.memory())
+                } else {
+                    (0.0, 0)
+                };
                 let mut p = proc.lock().await;
                 p.cpu_percent = cpu;
                 p.memory_bytes = mem;
@@ -41,17 +52,6 @@ impl ResourceMonitor {
                 p.cpu_percent = 0.0;
                 p.memory_bytes = 0;
             }
-        }
-    }
-
-    fn get_stats(&self, pid: u32) -> (f32, u64) {
-        let sysinfo_pid = Pid::from(pid as usize);
-        if let Some(process) = self.system.process(sysinfo_pid) {
-            let cpu = process.cpu_usage();
-            let mem = process.memory(); // bytes
-            (cpu, mem)
-        } else {
-            (0.0, 0)
         }
     }
 }

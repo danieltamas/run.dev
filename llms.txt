@@ -1,0 +1,85 @@
+# run.dev
+
+> AI-native local dev environment. One dashboard. All your services. Zero config files to babysit.
+
+run.dev (binary: `rundev`) is a single Rust binary that replaces MAMP, nginx configs, and Docker Compose for local development. It provides a TUI dashboard, automatic local domains with real HTTPS, a reverse proxy, process management, and AI-powered crash diagnosis via Claude.
+
+## Who it's for
+
+Developers running multiple services locally — microservices, frontends, APIs. Anyone tired of opening 6 terminal tabs every morning and fighting "address already in use" before their first coffee.
+
+## Key features
+
+- TUI dashboard: see every project and service at a glance, start/stop with a keystroke
+- Automatic local domains: `api.myapp.local`, `frontend.myapp.local` with real HTTPS
+- Zero-config SSL: mkcert (CA-trusted, works with .app/.dev TLDs) or rcgen fallback
+- Reverse proxy: SNI-based HTTPS routing from pretty URLs to localhost ports
+- Process management: spawn, monitor, restart with CPU/RAM stats per service
+- Smart project scanning: detects package.json, Cargo.toml, go.mod, manage.py, Gemfile, Procfile
+- AI crash diagnosis: Claude reads stderr and explains what went wrong
+- Mood system: vibing, chill, got the flu, wounded, flatlined, fixing
+
+## How it works
+
+1. Browser requests `https://api.myapp.local`
+2. /etc/hosts resolves to 127.0.0.1
+3. Port 443 forwards to 8443 via pfctl (macOS) or iptables (Linux)
+4. run.dev's HTTPS proxy reads SNI, picks the right SSL cert
+5. Host header maps to a route, traffic proxies to the service's localhost port
+
+## Tech stack
+
+- Language: Rust 2021 edition
+- TUI: ratatui + crossterm
+- Async: tokio
+- HTTPS: tokio-rustls + rustls
+- SSL certs: mkcert (preferred) or rcgen (fallback)
+- AI: Anthropic Claude API via local proxy
+- Config: serde + serde_yaml
+
+## Install
+
+```bash
+curl -fsSL https://getrun.dev/install.sh | bash
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/danieltamas/run.dev.git
+cd run.dev
+make install
+```
+
+Requirements: Rust toolchain. No Node, Python, Docker, or external certificate tools needed.
+
+## CLI commands
+
+- `rundev` — open the TUI dashboard
+- `rundev up [project]` — start project(s) and open dashboard
+- `rundev down [project]` — stop project(s)
+- `rundev status` — quick status check
+- `rundev list` — list all projects and services
+- `rundev doctor` — health check (ports, certs, hosts, helper)
+- `rundev clean` — stop everything, remove /etc/hosts entries
+- `rundev setup` — install privileged helper + port forwarding
+
+## Config
+
+Everything lives in `~/.config/rundev/` (or `~/Library/Application Support/rundev/` on macOS):
+
+- `projects/*.yaml` — one YAML per project (name, domain, services with path/command/port/subdomain)
+- `certs/` — auto-generated SSL certificates
+- `config.yaml` — global settings (Claude proxy URL, theme)
+- `state.json` — PID persistence for background mode
+
+## Architecture
+
+Modules: `app.rs` (state machine + event loop), `core/config.rs` (YAML project configs), `core/process.rs` (lifecycle management), `core/proxy.rs` (HTTP/HTTPS reverse proxy), `core/ssl.rs` (cert generation), `core/hosts.rs` (/etc/hosts management), `core/scanner.rs` (project detection), `core/resources.rs` (CPU/RAM monitoring), `ai/diagnose.rs` (Claude crash diagnosis), `ai/mood.rs` (personality system), `ui/dashboard.rs` (TUI rendering), `ui/command.rs` (AI command bar).
+
+## Links
+
+- Website: https://getrun.dev
+- Source: https://github.com/danieltamas/run.dev
+- Author: Daniel Tamas <hello@danieltamas.com>
+- License: MIT

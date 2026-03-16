@@ -93,7 +93,7 @@ where
 
     let request = &buf[..n];
 
-    // Debug status page — curl http://localhost:8080/__run
+    // Debug status page — curl http://localhost:1111/__run
     if request.starts_with(b"GET /__run") {
         let table = routes.read().await;
         let body = if table.is_empty() {
@@ -299,15 +299,16 @@ fn activate_pf() {
     const PF_ANCHOR: &str = "/etc/pf.anchors/rundev";
     const PF_CONF: &str = "/etc/pf.conf";
 
-    let rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 8080\n\
-                 rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443\n";
+    let rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 1111\n\
+                 rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112\n";
 
-    // Write anchor file if missing
-    if !std::path::Path::new(PF_ANCHOR).exists() {
+    // Only rewrite anchor if the rules have changed (avoids unnecessary sudo prompts)
+    let current = std::fs::read_to_string(PF_ANCHOR).unwrap_or_default();
+    if current.trim() != rules.trim() {
         let tmp = std::env::temp_dir().join("rundev-pf-anchor");
         if std::fs::write(&tmp, rules).is_ok() {
             let _ = std::process::Command::new("sudo")
-                .args(["cp", &tmp.to_string_lossy(), PF_ANCHOR])
+                .args(["-n", "cp", &tmp.to_string_lossy(), PF_ANCHOR])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -323,7 +324,7 @@ fn activate_pf() {
         let tmp = std::env::temp_dir().join("rundev-pf-conf");
         if std::fs::write(&tmp, &new_content).is_ok() {
             let _ = std::process::Command::new("sudo")
-                .args(["cp", &tmp.to_string_lossy(), PF_CONF])
+                .args(["-n", "cp", &tmp.to_string_lossy(), PF_CONF])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -331,7 +332,7 @@ fn activate_pf() {
         }
         // Reload full pf config so the new rdr-anchor directive takes effect
         let _ = std::process::Command::new("sudo")
-            .args(["pfctl", "-ef", PF_CONF])
+            .args(["-n", "pfctl", "-ef", PF_CONF])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -340,7 +341,7 @@ fn activate_pf() {
     // Load run.dev's anchor rules
     if std::path::Path::new(PF_ANCHOR).exists() {
         let _ = std::process::Command::new("sudo")
-            .args(["pfctl", "-a", "rundev", "-f", PF_ANCHOR])
+            .args(["-n", "pfctl", "-a", "rundev", "-f", PF_ANCHOR])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -352,7 +353,7 @@ fn activate_iptables() {
     // Only add the rule if it isn't already present
     let exists = std::process::Command::new("sudo")
         .args(["iptables", "-t", "nat", "-C", "OUTPUT", "-p", "tcp",
-               "--dport", "80", "-j", "REDIRECT", "--to-port", "8080"])
+               "--dport", "80", "-j", "REDIRECT", "--to-port", "1111"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -362,11 +363,11 @@ fn activate_iptables() {
     if !exists {
         let _ = std::process::Command::new("sudo")
             .args(["iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp",
-                   "--dport", "80", "-j", "REDIRECT", "--to-port", "8080"])
+                   "--dport", "80", "-j", "REDIRECT", "--to-port", "1111"])
             .status();
         let _ = std::process::Command::new("sudo")
             .args(["iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp",
-                   "--dport", "443", "-j", "REDIRECT", "--to-port", "8443"])
+                   "--dport", "443", "-j", "REDIRECT", "--to-port", "1112"])
             .status();
     }
 }
@@ -388,8 +389,8 @@ fn setup_pf() -> anyhow::Result<()> {
     const PF_ANCHOR: &str = "/etc/pf.anchors/rundev";
     const PF_CONF: &str = "/etc/pf.conf";
 
-    let anchor_rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 8080\n\
-                        rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443\n";
+    let anchor_rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 1111\n\
+                        rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112\n";
 
     let tmp = std::env::temp_dir().join("rundev-pf-anchor");
     std::fs::write(&tmp, anchor_rules)?;
@@ -478,7 +479,7 @@ mod tests {
 
     #[test]
     fn extract_host_with_port_strips_it() {
-        let req = b"GET / HTTP/1.1\r\nHost: myapp.local:8080\r\n\r\n";
+        let req = b"GET / HTTP/1.1\r\nHost: myapp.local:1111\r\n\r\n";
         assert_eq!(extract_host_header(req), Some("myapp.local".to_string()));
     }
 

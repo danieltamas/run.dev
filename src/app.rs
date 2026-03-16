@@ -127,6 +127,13 @@ pub struct ProjectView {
     pub expanded: bool,
 }
 
+/// Request to shell out to a service's working directory.
+pub struct ShellOutRequest {
+    pub working_dir: std::path::PathBuf,
+    pub env: std::collections::HashMap<String, String>,
+    pub service_name: String,
+}
+
 pub struct AppState {
     pub projects: Vec<ProjectView>,
     pub selected_project: usize,
@@ -148,6 +155,7 @@ pub struct AppState {
     pub row_map: Vec<RowInfo>,
     pub ai_tx: Option<mpsc::Sender<String>>,
     pub wizard: WizardState,
+    pub shell_out_request: Option<ShellOutRequest>,
 }
 
 impl AppState {
@@ -171,6 +179,7 @@ impl AppState {
             row_map: vec![],
             ai_tx: None,
             wizard: WizardState::Inactive,
+            shell_out_request: None,
         }
     }
 
@@ -291,7 +300,7 @@ pub async fn run_app(
         // thread so it doesn't stall the async executor, but we await it so
         // certs are on disk before SniCertResolver scans the directory.
         let domains: Vec<String> = state.projects.iter()
-            .map(|pv| pv.config.domain.clone())
+            .flat_map(|pv| pv.config.all_domains())
             .collect();
         let ssl_result = tokio::task::spawn_blocking(move || {
             let mut errors = vec![];
@@ -307,14 +316,14 @@ pub async fn run_app(
             state.error_message = Some(format!("SSL: {}", ssl_result.join("; ")));
         }
 
-        // Try to forward ports 80/443 → 8080/8443 via pfctl (setup by `rundev setup`)
+        // Try to forward ports 80/443 → 1111/1112 via pfctl (setup by `rundev setup`)
         activate_port_forwarding();
 
         let rt = route_table.clone();
-        tokio::spawn(async move { let _ = run_proxy(rt, 8080).await; });
+        tokio::spawn(async move { let _ = run_proxy(rt, 1111).await; });
 
         let rt2 = route_table.clone();
-        tokio::spawn(async move { let _ = run_https_proxy(rt2, 8443).await; });
+        tokio::spawn(async move { let _ = run_https_proxy(rt2, 1112).await; });
 
         state.proxy_running = true;
     }
@@ -354,7 +363,6 @@ pub async fn run_app(
                     // Re-sync proxy routes so auto-detected ports take effect
                     sync_proxy_routes(&state, &route_table).await;
                 }
-                sync_process_states(&mut state).await;
             }
 
             maybe_event = events.next() => {
@@ -372,6 +380,11 @@ pub async fn run_app(
             }
         }
 
+        // Shell out to a service's working directory
+        if let Some(req) = state.shell_out_request.take() {
+            shell_out(terminal, &req).await?;
+        }
+
         if state.should_quit {
             if state.quit_stop_all {
                 stop_all_services(&state).await;
@@ -385,22 +398,69 @@ pub async fn run_app(
     Ok(())
 }
 
+// ── Shell out ───────────────────────────────────────────────────────────────────
+
+async fn shell_out(
+    terminal: &mut crate::tui::Tui,
+    req: &ShellOutRequest,
+) -> Result<()> {
+    // Suspend TUI
+    crate::tui::restore()?;
+
+    eprintln!(
+        "\n  \x1b[36mshell for:\x1b[0m {}  \x1b[2m(type `exit` to return to run.dev)\x1b[0m\n",
+        req.service_name
+    );
+
+    // Spawn interactive shell at the service's working directory
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let _ = tokio::process::Command::new(&shell)
+        .current_dir(&req.working_dir)
+        .envs(&req.env)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await;
+
+    // Resume TUI
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
+    terminal.clear()?;
+
+    Ok(())
+}
+
 // ── Sync ───────────────────────────────────────────────────────────────────────
 
 async fn sync_process_states(state: &mut AppState) {
-    for pv in &mut state.projects {
-        for (i, shared) in pv.shared.iter().enumerate() {
+    let selected_proj = state.selected_project;
+    let selected_svc = state.selected_service;
+
+    for (pi, pv) in state.projects.iter_mut().enumerate() {
+        for (si, shared) in pv.shared.iter().enumerate() {
             let p = shared.lock().await;
-            if let Some(proc) = pv.processes.get_mut(i) {
+            if let Some(proc) = pv.processes.get_mut(si) {
                 proc.status = p.status.clone();
                 proc.pid = p.pid;
-                proc.port = p.port; // picks up auto-detected port
+                proc.port = p.port;
                 proc.cpu_percent = p.cpu_percent;
                 proc.memory_bytes = p.memory_bytes;
                 proc.crash_count = p.crash_count;
-                proc.last_stderr = p.last_stderr.clone();
-                proc.stdout_log = p.stdout_log.clone();
-                proc.combined_log = p.combined_log.clone();
+                // Only clone log buffers when needed and when they've changed
+                let is_selected = pi == selected_proj && selected_svc == Some(si);
+                if is_selected {
+                    // Only re-clone if line count changed (new output arrived)
+                    if proc.combined_log.len() != p.combined_log.len() {
+                        proc.last_stderr = p.last_stderr.clone();
+                        proc.stdout_log = p.stdout_log.clone();
+                        proc.combined_log = p.combined_log.clone();
+                    }
+                }
             }
         }
     }
@@ -795,6 +855,15 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 KeyCode::Char('e') => open_rename_wizard(state),
                 KeyCode::Char('d') => open_delete_confirm(state),
                 KeyCode::Char('l') => { state.log_panel_open = true; state.log_scroll = 0; }
+                KeyCode::Char('t') => {
+                    if let Some(proc) = state.selected_service_proc() {
+                        state.shell_out_request = Some(ShellOutRequest {
+                            working_dir: proc.working_dir.clone(),
+                            env: proc.env.clone(),
+                            service_name: proc.id.clone(),
+                        });
+                    }
+                }
                 _ => {} // Esc or anything else just closes
             }
         }
@@ -1111,6 +1180,15 @@ async fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         KeyCode::Char('x') => stop_selected(state).await,
         KeyCode::Char('r') => restart_selected(state).await,
         KeyCode::Char('l') => { state.log_panel_open = !state.log_panel_open; state.log_scroll = 0; }
+        KeyCode::Char('t') => {
+            if let Some(proc) = state.selected_service_proc() {
+                state.shell_out_request = Some(ShellOutRequest {
+                    working_dir: proc.working_dir.clone(),
+                    env: proc.env.clone(),
+                    service_name: proc.id.clone(),
+                });
+            }
+        }
         KeyCode::Char('f') => fix_selected(state).await,
         KeyCode::Char('/') => { state.command_focused = true; state.command_input.clear(); }
         KeyCode::Tab => state.log_panel_open = !state.log_panel_open,
@@ -1273,8 +1351,18 @@ async fn start_selected(state: &mut AppState) {
         }
         update_hosts_for_state(state);
 
-        // Generate SSL cert in background (non-blocking)
-        if let Some(domain) = state.projects.get(proj_idx).map(|pv| pv.config.domain.clone()) {
+        // Generate SSL cert for the service's actual domain (not just the project domain)
+        if let Some(domain) = state.projects.get(proj_idx).and_then(|pv| {
+            let proc = pv.processes.get(svc_idx)?;
+            let svc_name = proc.id.split('/').last().unwrap_or(&proc.id);
+            if let Some(svc) = pv.config.services.get(svc_name) {
+                Some(crate::core::config::resolve_domain(&svc.subdomain, &pv.config.domain))
+            } else if svc_name.contains('.') {
+                Some(svc_name.to_string())
+            } else {
+                Some(pv.config.domain.clone())
+            }
+        }) {
             tokio::task::spawn_blocking(move || { let _ = ensure_ssl(&domain); });
         }
 
@@ -1283,9 +1371,10 @@ async fn start_selected(state: &mut AppState) {
             tokio::spawn(async move { let _ = spawn_process(shared).await; });
         }
     } else {
-        // Start all services in the project
-        let (domain, n) = state.projects.get(proj_idx)
-            .map(|pv| (pv.config.domain.clone(), pv.processes.len()))
+        // Start all services in the project — generate certs for ALL service domains
+        let n = state.projects.get(proj_idx).map(|pv| pv.processes.len()).unwrap_or(0);
+        let domains: Vec<String> = state.projects.get(proj_idx)
+            .map(|pv| pv.config.all_domains())
             .unwrap_or_default();
         for i in 0..n {
             if let Some(proc) = state.projects.get_mut(proj_idx)
@@ -1295,8 +1384,10 @@ async fn start_selected(state: &mut AppState) {
             }
         }
         update_hosts_for_state(state);
-        if !domain.is_empty() {
-            tokio::task::spawn_blocking(move || { let _ = ensure_ssl(&domain); });
+        for domain in domains {
+            if !domain.is_empty() {
+                tokio::task::spawn_blocking(move || { let _ = ensure_ssl(&domain); });
+            }
         }
         if let Some(pv) = state.projects.get(proj_idx) {
             for s in pv.shared.clone() {
@@ -1373,8 +1464,14 @@ async fn fix_selected(state: &mut AppState) {
     let no_ai = state.no_ai;
 
     if let Some(proc) = proc_info {
-        if let ProcessStatus::Crashed { ref stderr_tail, .. } = proc.status {
-            let error_kind = categorize_error(stderr_tail);
+        // Check for fixable errors in both crashed status and live stderr
+        // (e.g. nodemon keeps the process "running" even after a crash)
+        let stderr_text = match &proc.status {
+            ProcessStatus::Crashed { ref stderr_tail, .. } => stderr_tail.clone(),
+            _ => proc.last_stderr.iter().cloned().collect::<Vec<_>>().join("\n"),
+        };
+        if !stderr_text.is_empty() {
+            let error_kind = categorize_error(&stderr_text);
             if let Some(action) = auto_fix_action(&error_kind, &proc) {
                 state.run_message = Some("fixing...".to_string());
                 let shared = state.selected_service_shared();
@@ -1396,7 +1493,7 @@ async fn fix_selected(state: &mut AppState) {
             } else if !no_ai {
                 state.run_message = Some("asking claude...".to_string());
                 let service = proc.id.clone();
-                let stderr = stderr_tail.clone();
+                let stderr = stderr_text.clone();
                 if let Some(tx) = ai_tx {
                     tokio::spawn(async move {
                         let r = diagnose_crash(&service, &stderr).await

@@ -22,7 +22,7 @@ fn system_prompt() -> String {
     let port_forwarding = if os == "macos" {
         "macOS pfctl (pf firewall): rules are in /etc/pf.anchors/rundev, loaded via `sudo pfctl -ef /etc/pf.anchors/rundev` on each launch. Requires a NOPASSWD sudoers entry for /sbin/pfctl in /etc/sudoers.d/rundev."
     } else if os == "linux" {
-        "Linux iptables: rules added via `sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 8080` (and 443→8443). Persisted via iptables-save to /etc/iptables/rules.v4."
+        "Linux iptables: rules added via `sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 1111` (and 443→1112). Persisted via iptables-save to /etc/iptables/rules.v4."
     } else {
         "Port forwarding is not configured on this platform."
     };
@@ -46,8 +46,8 @@ fn system_prompt() -> String {
 The full request path for a custom domain is:
   Browser → domain (e.g. win.wam.app)
     → /etc/hosts maps it to 127.0.0.1
-    → Port forwarding redirects port 80 → 8080 (and 443 → 8443)
-    → run.dev's reverse proxy (listening on 127.0.0.1:8080) reads the Host header
+    → Port forwarding redirects port 80 → 1111 (and 443 → 1112)
+    → run.dev's reverse proxy (listening on 127.0.0.1:1111) reads the Host header
     → Routes to the correct local service port (e.g. localhost:5111)
 
 Port forwarding on this system ({os}): {port_forwarding}

@@ -20,6 +20,16 @@ use std::panic;
 
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
+/// Guard that restores the terminal on drop — catches panics, early returns,
+/// and normal exits. Only signals (SIGKILL) can bypass this.
+pub struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = restore();
+    }
+}
+
 pub fn init() -> Result<Tui> {
     // Install panic hook so terminal is restored on panic
     let original_hook = panic::take_hook();
@@ -39,5 +49,10 @@ pub fn init() -> Result<Tui> {
 pub fn restore() -> Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    // Belt-and-suspenders: explicitly reset all mouse tracking modes.
+    // crossterm's DisableMouseCapture may not cover SGR extended mode
+    // on all terminals, leaving the shell flooded with escape sequences.
+    print!("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
+    let _ = io::Write::flush(&mut io::stdout());
     Ok(())
 }

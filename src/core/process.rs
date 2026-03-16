@@ -275,6 +275,28 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         if matches!(p.status, ProcessStatus::Running | ProcessStatus::Starting) {
             let exit_code = exit_status.ok().and_then(|s| s.code()).unwrap_or(-1);
             let stderr_tail = p.stderr_tail(20);
+
+            // Auto-recover from EADDRINUSE: kill the port hog and restart once
+            if p.crash_count == 0
+                && (stderr_tail.contains("EADDRINUSE") || stderr_tail.contains("address already in use"))
+            {
+                // Extract port from stderr
+                let port = extract_port_from_eaddrinuse(&stderr_tail).unwrap_or(p.port);
+                if port > 0 {
+                    p.crash_count += 1;
+                    p.pid = None;
+                    p.status = ProcessStatus::Stopped;
+                    remove_pid(&id_clone);
+                    drop(p); // release lock before async work
+                    kill_port(port).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Retry in a new task to satisfy Send bounds
+                    let pc = proc_clone.clone();
+                    tokio::spawn(async move { let _ = spawn_process(pc).await; });
+                    return;
+                }
+            }
+
             p.status = ProcessStatus::Crashed { exit_code, stderr_tail };
             p.crash_count += 1;
             p.pid = None;
@@ -378,19 +400,43 @@ fn remove_pid(id: &str) {
     save_state(&state);
 }
 
+/// Extract the port number from an EADDRINUSE error message.
+fn extract_port_from_eaddrinuse(stderr: &str) -> Option<u16> {
+    for line in stderr.lines() {
+        // Match ":::8898" or "port: 8898" or ":8898"
+        if let Some(pos) = line.rfind(":::") {
+            if let Some(p) = line[pos + 3..].split(|c: char| !c.is_ascii_digit()).next()
+                .and_then(|s| s.parse::<u16>().ok()).filter(|&p| p > 0) {
+                return Some(p);
+            }
+        }
+        if let Some(pos) = line.find("port:") {
+            if let Some(p) = line[pos + 5..].trim().split(|c: char| !c.is_ascii_digit()).next()
+                .and_then(|s| s.parse::<u16>().ok()).filter(|&p| p > 0) {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 /// Scan a log line for a port number.
 /// Recognises patterns like `:5111`, `port 5111`, `PORT=5111`,
 /// `localhost:5111`, `0.0.0.0:5111`, `ready on 5111`, `listening on 5111`.
 pub fn detect_port_in_line(line: &str) -> Option<u16> {
     let lower = line.to_ascii_lowercase();
 
-    // Check colon-prefixed port: ":NNNN"
-    let bytes = line.as_bytes();
-    for i in 0..bytes.len().saturating_sub(1) {
-        if bytes[i] == b':' {
-            let rest = &line[i + 1..];
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if digits.len() >= 4 {
+    // Check colon-prefixed port with context: "localhost:NNNN", "0.0.0.0:NNNN",
+    // "127.0.0.1:NNNN", ":::NNNN", "http://...:NNNN"
+    // Avoids false positives from timestamps, PIDs, or random numbers after colons.
+    let port_prefixes = ["localhost:", "127.0.0.1:", "0.0.0.0:", ":::", "[::]:",
+                         "http://localhost:", "https://localhost:",
+                         "http://0.0.0.0:", "http://127.0.0.1:"];
+    for prefix in &port_prefixes {
+        if let Some(pos) = lower.find(prefix) {
+            let after = &line[pos + prefix.len()..];
+            let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
                 if let Ok(p) = digits.parse::<u16>() {
                     if p > 1024 && p < 65535 {
                         return Some(p);

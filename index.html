@@ -6,17 +6,28 @@
   <title>run.dev — AI-native local dev environment</title>
   <meta name="description" content="One dashboard for all your local services. Automatic domains, SSL, reverse proxy, process management, and AI crash diagnosis. Single binary. Zero config.">
   <meta name="theme-color" content="#0a0a0a">
+  <meta name="author" content="Daniel Tamas">
+  <meta name="creator" content="Daniel Tamas">
+  <meta name="publisher" content="Daniel Tamas">
+  <meta name="keywords" content="run.dev, rundev, local dev environment, reverse proxy, SSL, process manager, AI, Claude, Rust, macOS, Linux, developer tools">
+  <link rel="canonical" href="https://getrun.dev">
 
   <!-- Open Graph -->
   <meta property="og:title" content="run.dev — AI-native local dev environment">
   <meta property="og:description" content="One dashboard for all your local services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://getrun.dev">
+  <meta property="og:site_name" content="run.dev">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="run.dev — AI-native local dev environment">
   <meta name="twitter:description" content="One dashboard for all your local services. Single binary. Zero config.">
+  <meta name="twitter:creator" content="@danieltamas">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap" rel="stylesheet">
 
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -91,6 +102,18 @@
     }
 
     .hero h1 .dot { color: var(--cyan); }
+
+    .hero-ascii {
+      font-family: 'Fira Code', var(--font-mono);
+      font-size: clamp(10px, 2.4vw, 22px);
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 32px;
+      white-space: pre;
+      letter-spacing: 0;
+    }
+
+    .hero-ascii .dot-col { color: var(--cyan); }
 
     .hero .tagline {
       font-size: clamp(18px, 3vw, 22px);
@@ -263,6 +286,14 @@
       font-size: 14px;
       line-height: 1.6;
       padding: 0 36px 32px;
+    }
+
+    .terminal-rule {
+      display: block;
+      border: none;
+      border-top: 1px solid var(--text-muted);
+      margin: 4px 0;
+      opacity: 0.4;
     }
 
     .t-cyan { color: var(--cyan); }
@@ -645,7 +676,11 @@
 
   <section class="hero">
     <div class="hero-label">AI-native local dev environment</div>
-    <h1>run<span class="dot">.</span>dev</h1>
+    <pre class="hero-ascii" aria-label="RUN.DEV"> ██████  ██    ██ ███    ██   ██████  ███████ ██    ██
+ ██   ██ ██    ██ ████   ██   ██   ██ ██      ██    ██
+ ██████  ██    ██ ██ ██  ██   ██   ██ █████   ██    ██
+ ██   ██ ██    ██ ██  ██ ██<span class="dot-col"> ██ </span>██   ██ ██       ██  ██
+ ██   ██ ██████  ██   ████<span class="dot-col"> ██ </span>██████  ███████   ████</pre>
     <p class="tagline">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
 
     <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
@@ -689,12 +724,11 @@
         </div>
         <div class="terminal-body">
           <div class="terminal-header">
-            <div class="terminal-logo">██████╗ ██╗   ██╗███╗   ██╗  ██████╗ ███████╗██╗   ██╗
-██╔══██╗██║   ██║████╗  ██║  ██╔══██╗██╔════╝██║   ██║
-██████╔╝██║   ██║██╔██╗ ██║  ██║  ██║█████╗  ██║   ██║
-██╔══██╗██║   ██║██║╚██╗██║  ██║  ██║██╔══╝  ╚██╗ ██╔╝
-██║  ██║╚██████╔╝██║ ╚████║  ██████╔╝███████╗ ╚████╔╝
-╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝
+            <div class="terminal-logo">██████  ██    ██ ███    ██    ██████  ███████ ██    ██
+██   ██ ██    ██ ████   ██    ██   ██ ██      ██    ██
+██████  ██    ██ ██ ██  ██    ██   ██ █████   ██    ██
+██   ██ ██    ██ ██  ██ ██<span class="t-white"> ██ </span>██   ██ ██       ██  ██
+██   ██  ██████  ██   ████<span class="t-white"> ██ </span>██████  ███████   ████
 
 <span class="t-dim" style="font-size:13px;">Daniel Tamas
 hello@danieltamas.com</span></div>
@@ -710,7 +744,7 @@ hello@danieltamas.com</span></div>
             </div>
           </div>
           <div class="terminal-table"><span class="t-dim">© 2026 Daniel Tamas — danieltamas.com</span>
-<span class="t-dim">projects ──────────────────────────────────────────────────────────────────────────────</span>
+<hr class="terminal-rule"><span class="t-dim">projects</span>
 <span class="t-dim">        service                            url                          local            mem    cpu</span>
 
 <span class="t-dim">▼</span> <span class="t-white">WAM</span>  <span class="t-dim">2 services</span>  ✨
@@ -719,9 +753,7 @@ hello@danieltamas.com</span></div>
 <span class="t-dim">▼</span> <span class="t-white">side-project</span>  <span class="t-dim">1 service</span>  😌
 <span class="t-dim">│</span> <span class="t-red">✗</span> <span class="t-red">backend</span>        <span class="t-yellow">bro, backend is ded. port 3000 is already taken.</span>
 <span class="t-dim">│</span>                  <span class="t-dim">press [f] to let me fix it</span>
-
-<span class="t-dim">──────────────────────────────────────────────────────────────────────────────────────</span>
-<span class="t-dim">/ ask claude something...</span></div>
+<hr class="terminal-rule"><span class="t-dim">/ ask claude something...</span></div>
         </div>
       </div>
     </div>
@@ -864,7 +896,7 @@ hello@danieltamas.com</span></div>
   <!-- ── Footer ────────────────────────────────────── -->
 
   <footer>
-    <p>Built by <a href="mailto:hello@danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/danieltamas/run.dev">Source</a></p>
+    <p>Built by <a href="https://danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/danieltamas/run.dev">Source</a></p>
   </footer>
 
   <!-- ── Copy to clipboard ─────────────────────────── -->

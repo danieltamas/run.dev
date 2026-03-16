@@ -191,10 +191,10 @@ fn render_banner(f: &mut Frame, area: Rect, state: &AppState) {
             Constraint::Length(1), // [0] empty
             Constraint::Length(2), // [1] status line (2 rows, wraps)
             Constraint::Length(1), // [2] empty
-            Constraint::Length(1), // [3] tip: add / new / rename / delete
-            Constraint::Length(1), // [4] tip: start / stop / restart / logs
-            Constraint::Length(1), // [5] tip: ask AI
-            Constraint::Length(1), // [6] tip: quit
+            Constraint::Length(1), // [3] tip: add / new / rename
+            Constraint::Length(1), // [4] tip: start / stop / pause
+            Constraint::Length(1), // [5] tip: restart / logs / delete
+            Constraint::Length(1), // [6] tip: ask AI / quit
             Constraint::Length(1), // [7] empty
             Constraint::Length(1), // [8] proj count + version
             Constraint::Min(0),
@@ -226,18 +226,21 @@ fn render_banner(f: &mut Frame, area: Rect, state: &AppState) {
     // Key tips
     let dim = Style::default().fg(Color::DarkGray);
     f.render_widget(
-        Paragraph::new("[a] add service  [n] new project  [e] rename  [d] delete").style(dim),
+        Paragraph::new("[a] add  [n] new project  [e] rename").style(dim),
         right[3],
     );
     f.render_widget(
-        Paragraph::new("[s] start  [x] stop  [p] pause routing  [r] restart  [l] logs").style(dim),
+        Paragraph::new("[s] start  [x] stop  [p] pause").style(dim),
         right[4],
     );
     f.render_widget(
-        Paragraph::new("[/] ask the AI anything").style(dim),
+        Paragraph::new("[r] restart  [l] logs  [t] shell").style(dim),
         right[5],
     );
-    f.render_widget(Paragraph::new("[q] quit").style(dim), right[6]);
+    f.render_widget(
+        Paragraph::new("[d] delete  [/] ask AI  [q] quit").style(dim),
+        right[6],
+    );
 
     // Project count + version
     let proj_count = state.projects.len();

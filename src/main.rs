@@ -102,8 +102,9 @@ async fn main() -> Result<()> {
             let mut state = AppState::new(cli.no_proxy, cli.no_ai);
             state.load_projects();
             let mut terminal = tui::init()?;
+            let _guard = tui::TerminalGuard;
             let result = run_app(&mut terminal, state).await;
-            tui::restore()?;
+            drop(_guard);
             result?;
         }
 
@@ -118,8 +119,9 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
             let mut terminal = tui::init()?;
+            let _guard = tui::TerminalGuard;
             let result = run_app(&mut terminal, state).await;
-            tui::restore()?;
+            drop(_guard);
             result?;
         }
 
@@ -240,9 +242,9 @@ fn cmd_doctor() {
     println!("mkcert:    {}", if mkcert_ok { "✅ installed (trusted HTTPS)" } else { "⚠️  not found — run: brew install mkcert && mkcert -install" });
 
     let port_80 = std::net::TcpListener::bind("127.0.0.1:80").is_ok();
-    let port_8080 = std::net::TcpListener::bind("127.0.0.1:8080").is_ok();
+    let port_1111 = std::net::TcpListener::bind("127.0.0.1:1111").is_ok();
     println!("port 80:   {}", if port_80 { "✅ available" } else { "⚠️  in use" });
-    println!("port 8080: {}", if port_8080 { "✅ available" } else { "⚠️  in use" });
+    println!("port 1111: {}", if port_1111 { "✅ available" } else { "⚠️  in use" });
 
     let config_dir = core::config::projects_dir();
     let projects = load_all_projects();
@@ -328,10 +330,10 @@ fn cmd_setup() -> Result<()> {
     println!("✅ Privileged hosts helper installed — no more password prompts");
 
     // ── 3. Port forwarding ───────────────────────────────────────────────────
-    println!("\nSetting up port forwarding (80 → 8080, 443 → 8443)...");
+    println!("\nSetting up port forwarding (80 → 1111, 443 → 1112)...");
     match core::proxy::setup_port_forwarding() {
         Ok(_) => println!("✅ Port forwarding active — browser traffic will route correctly"),
-        Err(e) => println!("⚠️  Port forwarding setup failed: {}\n   HTTP proxy will still work on :8080", e),
+        Err(e) => println!("⚠️  Port forwarding setup failed: {}\n   HTTP proxy will still work on :1111", e),
     }
 
     // Write sentinel so `rundev` never prompts for helper install again
@@ -407,7 +409,7 @@ fn ensure_hosts_helper() -> Result<()> {
     }
 
     // Set up port forwarding (80→8080, 443→8443) so browser traffic reaches the proxy.
-    println!("  Setting up port forwarding (80 → 8080, 443 → 8443)...");
+    println!("  Setting up port forwarding (80 → 1111, 443 → 1112)...");
     match core::proxy::setup_port_forwarding() {
         Ok(_)  => println!("  ✅ Port forwarding active.\n"),
         Err(e) => eprintln!("  ⚠️  Port forwarding failed: {}\n", e),
