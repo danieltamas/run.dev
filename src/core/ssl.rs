@@ -121,10 +121,15 @@ pub fn ensure_ssl(domain: &str) -> Result<()> {
     let already_mkcert = marker_path.exists();
 
     if cert_path.exists() && key_path.exists() {
-        if already_mkcert {
+        // Auto-renew if cert expires within 30 days
+        if cert_expires_soon(&cert_path, 30) {
+            let _ = std::fs::remove_file(&cert_path);
+            let _ = std::fs::remove_file(&key_path);
+            let _ = std::fs::remove_file(&marker_path);
+            // Fall through to regenerate
+        } else if already_mkcert {
             return Ok(());
-        }
-        if mkcert_available() {
+        } else if mkcert_available() {
             // Upgrade existing rcgen cert to mkcert-trusted cert
             let _ = std::fs::remove_file(&cert_path);
             let _ = std::fs::remove_file(&key_path);
@@ -149,6 +154,46 @@ pub fn ensure_ssl(domain: &str) -> Result<()> {
 
     // 3. Fallback: self-signed via rcgen (browser will warn for non-.local domains)
     generate_with_rcgen(domain, &cert_path, &key_path)
+}
+
+/// Returns true if the PEM certificate at `path` expires within `days` days.
+/// Returns false on any parse error (treat unparseable certs as still valid to
+/// avoid unnecessary churn).
+fn cert_expires_soon(path: &Path, days: u32) -> bool {
+    let Ok(pem_bytes) = std::fs::read(path) else { return false };
+    let mut reader = &pem_bytes[..];
+    let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
+        .filter_map(|r| r.ok())
+        .collect();
+    let Some(cert_der) = certs.first() else { return false };
+
+    // Parse the X.509 certificate to read notAfter
+    // DER structure: SEQUENCE { tbsCertificate SEQUENCE { ... validity SEQUENCE { notBefore, notAfter } } }
+    // Instead of pulling in a full x509 parser, shell out to openssl which is always available.
+    let output = std::process::Command::new("openssl")
+        .args(["x509", "-noout", "-enddate", "-inform", "DER"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    let Ok(mut child) = output else { return false };
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = std::io::Write::write_all(stdin, cert_der.as_ref());
+    }
+    let Ok(output) = child.wait_with_output() else { return false };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Format: "notAfter=Jun 16 14:58:48 2028 GMT"
+    let Some(date_str) = stdout.strip_prefix("notAfter=") else { return false };
+    let date_str = date_str.trim();
+
+    // Parse with chrono
+    use chrono::{NaiveDateTime, Utc};
+    let Ok(expiry) = NaiveDateTime::parse_from_str(date_str, "%b %d %H:%M:%S %Y GMT") else { return false };
+    let now = Utc::now().naive_utc();
+    let remaining = expiry.signed_duration_since(now);
+    remaining.num_days() < days as i64
 }
 
 /// Search common locations (MAMP Pro, Homebrew nginx, etc.) for an existing

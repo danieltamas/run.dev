@@ -10,6 +10,7 @@
   <meta name="creator" content="Daniel Tamas">
   <meta name="publisher" content="Daniel Tamas">
   <meta name="keywords" content="run.dev, rundev, local dev environment, reverse proxy, SSL, process manager, AI, Claude, Rust, macOS, Linux, developer tools">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="canonical" href="https://getrun.dev">
 
   <!-- Open Graph -->
@@ -107,13 +108,14 @@
       font-family: 'Fira Code', var(--font-mono);
       font-size: clamp(10px, 2.4vw, 22px);
       line-height: 1.15;
-      color: #ffffff;
+      color: var(--cyan);
       margin-bottom: 32px;
       white-space: pre;
       letter-spacing: 0;
+      text-align: left;
     }
 
-    .hero-ascii .dot-col { color: var(--cyan); }
+    .hero-ascii .dot-col { color: #ffffff; }
 
     .hero .tagline {
       font-size: clamp(18px, 3vw, 22px);
@@ -676,11 +678,11 @@
 
   <section class="hero">
     <div class="hero-label">AI-native local dev environment</div>
-    <pre class="hero-ascii" aria-label="RUN.DEV"> ██████  ██    ██ ███    ██   ██████  ███████ ██    ██
- ██   ██ ██    ██ ████   ██   ██   ██ ██      ██    ██
- ██████  ██    ██ ██ ██  ██   ██   ██ █████   ██    ██
+    <pre class="hero-ascii" aria-label="RUN.DEV"> ██████  ██    ██ ███    ██    ██████  ███████ ██    ██
+ ██   ██ ██    ██ ████   ██    ██   ██ ██      ██    ██
+ ██████  ██    ██ ██ ██  ██    ██   ██ █████   ██    ██
  ██   ██ ██    ██ ██  ██ ██<span class="dot-col"> ██ </span>██   ██ ██       ██  ██
- ██   ██ ██████  ██   ████<span class="dot-col"> ██ </span>██████  ███████   ████</pre>
+ ██   ██  ██████  ██   ████<span class="dot-col"> ██ </span>██████  ███████   ████</pre>
     <p class="tagline">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
 
     <div class="install-box" onclick="copyInstall(this)" title="Click to copy">

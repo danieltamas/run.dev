@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" shape-rendering="crispEdges">
+  <!-- Background -->
+  <rect width="40" height="40" rx="3" fill="#000"/>
+
+  <!-- D: top bar -->
+  <rect x="14" y="5" width="16" height="4" fill="#45c8d4"/>
+  <!-- D: left bar -->
+  <rect x="14" y="5" width="4" height="28" fill="#45c8d4"/>
+  <!-- D: bottom bar -->
+  <rect x="14" y="29" width="16" height="4" fill="#45c8d4"/>
+  <!-- D: right bar (inner edge of D curve) -->
+  <rect x="26" y="9" width="4" height="20" fill="#45c8d4"/>
+  <!-- D: right ear (the bump extending past the curve) -->
+  <rect x="28" y="13" width="5" height="12" fill="#45c8d4"/>
+  <!-- D: cutout (hollow inside the D) -->
+  <rect x="18" y="9" width="8" height="20" fill="#000"/>
+
+  <!-- Period / dot -->
+  <rect x="6" y="26" width="5" height="7" fill="#fff"/>
+</svg>

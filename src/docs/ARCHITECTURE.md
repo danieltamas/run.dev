@@ -69,14 +69,15 @@ run.dev/
 
 | Type | File | Purpose |
 |------|------|---------|
-| `AppState` | `app.rs` | Central state — projects, selection, wizard, mood, flags |
+| `AppState` | `app.rs` | Central state — projects, selection, wizard, mood, flags, `shell_out_request` |
 | `ProjectView` | `app.rs` | A loaded project with its processes and crash info |
+| `ShellOutRequest` | `app.rs` | Carries working dir + env for `[t]` shell-out — suspends TUI, opens `$SHELL` |
 | `WizardState` | `app.rs` | Enum — multi-step creation/rename flow |
 | `ManagedProcess` | `core/process.rs` | A running service: PID, status, logs, resources, `proxied` flag |
 | `SharedProcess` | `core/process.rs` | `Arc<Mutex<ManagedProcess>>` — shared across async tasks |
 | `ProcessStatus` | `core/process.rs` | `Stopped \| Starting \| Running \| Crashed \| Restarting` |
 | `ProjectConfig` | `core/config.rs` | YAML-serializable project definition |
-| `ServiceConfig` | `core/config.rs` | YAML-serializable service definition (owns the domain) |
+| `ServiceConfig` | `core/config.rs` | YAML-serializable service definition (owns the domain, optional `node_version` for nvm) |
 | `GlobalConfig` | `core/config.rs` | App-wide settings (Claude proxy, theme, premium) |
 | `DetectedCommand` | `core/scanner.rs` | Scanner output: label, command, recommended flag, port |
 | `ProxyRoute` | `core/proxy.rs` | Domain → target port mapping |
@@ -103,8 +104,11 @@ main.rs: parse CLI (clap)
             ├── ensure_hosts_helper() — install privileged helper if missing
             ├── AppState::new()
             │     ├── load_projects() from ~/.config/rundev/projects/*.yaml
+            │     │     └── all services loaded with proxied = true
+            │     ├── ensure_ssl() for all service domains (spawn_blocking)
             │     ├── kill_orphaned_pids() from state.json
-            │     ├── start proxy (HTTP :8080, HTTPS :8443)
+            │     ├── activate_port_forwarding() — pfctl/iptables (80→1111, 443→1112)
+            │     ├── start HTTP proxy (:1111) and HTTPS proxy (:1112)
             │     └── init ResourceMonitor
             │
             ├── tui::init() — raw mode, alternate screen, mouse capture
@@ -124,13 +128,15 @@ loop {
     2. Handle input → mutate AppState
        - Navigation: j/k/↑/↓, Enter expand/collapse, Tab cycle
        - Actions: s start, x stop, p pause routing, r restart, f auto-fix
+       - Shell: t opens $SHELL at service working dir (TUI suspends, resumes on exit)
        - Wizard: a add project/service, text input flow
        - Command bar: / focus, type question, Enter send to Claude
-    3. Process completed async tasks (crashes, AI responses)
-    4. Tick resource monitor (sysinfo refresh)
-    5. Recalculate mood from aggregate service states
-    6. Update proxy route table from running services
-    7. Render frame via ratatui
+    3. If shell_out_request is set → suspend TUI, run interactive shell, resume TUI
+    4. Process completed async tasks (crashes, AI responses)
+    5. Tick resource monitor (sysinfo refresh)
+    6. Recalculate mood from aggregate service states
+    7. Update proxy route table from running services
+    8. Render frame via ratatui
 }
 ```
 
@@ -140,9 +146,12 @@ Domains live at the **service level**, not the project level. Each service indep
 
 ```
 [s] start service
-    ├── ensure_ssl(domain) — generate cert if missing
     ├── proc.proxied = true
-    ├── update_hosts_for_state() — adds domain to /etc/hosts
+    ├── update_hosts_for_state() — adds domain to /etc/hosts immediately
+    ├── ensure_ssl(service_domain) — spawn_blocking (never blocks event loop)
+    │     ├── ensure_mkcert() if .ca_installed sentinel missing (one-time)
+    │     ├── upgrade rcgen → mkcert if no .mkcert marker and mkcert available
+    │     └── auto-renew if cert expires within 30 days
     └── spawn_process() — start the child process
 
 [p] pause routing
@@ -170,25 +179,37 @@ Domains live at the **service level**, not the project level. Each service indep
 Browser: https://win.wam.app/path
     │
     ├── DNS: /etc/hosts maps win.wam.app → 127.0.0.1
-    ├── Port forward: pfctl (macOS) or iptables (Linux) — 443 → 8443
-    ├── HTTPS proxy (127.0.0.1:8443)
-    │     ├── TLS handshake — SNI selects cert for wam.app
+    ├── Port forward: pfctl (macOS) or iptables (Linux) — 443 → 1112
+    ├── HTTPS proxy (127.0.0.1:1112)
+    │     ├── TLS handshake (5s timeout) — SNI resolver reads cert from disk:
+    │     │     ├── try win.wam.app.pem (exact match)
+    │     │     └── try wam.app.pem (wildcard *.wam.app fallback)
     │     ├── Read HTTP request, extract Host header
-    │     ├── RouteTable lookup: win.wam.app → port 4000
-    │     └── TCP connect to 127.0.0.1:4000, bidirectional copy
+    │     ├── Inject X-Forwarded-Proto / X-Forwarded-Host / X-Real-IP headers
+    │     ├── RouteTable lookup: win.wam.app → port 5111
+    │     └── TCP connect to 127.0.0.1:5111, bidirectional copy
     │
     └── Service responds, browser shows green padlock
+
+Browser: http://win.wam.app/path
+    │
+    ├── Port forward: pfctl/iptables — 80 → 1111
+    ├── HTTP proxy (127.0.0.1:1111)
+    │     ├── Domain has cert? → 301 redirect to https://win.wam.app/path
+    │     └── No cert → forward directly to service port
 ```
 
-For HTTP (non-SSL): same flow but port 80 → 8080, no TLS.
+Debug: `curl http://localhost:1111/__run` prints the live proxy route table.
 
 ### Process Lifecycle
 
 ```
 spawn_process()
+    ├── wrap_command_with_nvm(command, node_version)
+    │     └── if node_version set → bash -c '. nvm.sh && nvm use VERSION && COMMAND'
     ├── shlex::split(command) → parse shell string safely
-    ├── kill_port(port) → clear port if occupied
-    ├── tokio::process::Command::new() → spawn child
+    ├── kill_port(port) → clear port if occupied (LISTEN-only, excludes self PID)
+    ├── tokio::process::Command::new() → spawn child (.process_group(0), stdin null)
     ├── Async stdout/stderr readers → ring buffers (100 lines max)
     ├── Port detection: scan first 50 lines for port patterns
     ├── persist_pid() → write to state.json
@@ -228,7 +249,7 @@ All persistent state lives under the platform config directory:
 |------|----------|
 | `~/.config/rundev/projects/*.yaml` | One YAML file per project |
 | `~/.config/rundev/config.yaml` | Global settings (Claude proxy, theme) |
-| `~/.config/rundev/certs/` | SSL certs (`{domain}.pem`, `{domain}-key.pem`, `{domain}.mkcert` marker) |
+| `~/.config/rundev/certs/` | SSL certs (`{domain}.pem`, `{domain}-key.pem`, `{domain}.mkcert` marker, `.ca_installed` sentinel) |
 | `~/.config/rundev/state.json` | PID map for background persistence |
 
 > On macOS, `~/.config/rundev/` resolves to `~/Library/Application Support/rundev/`.
@@ -246,6 +267,12 @@ services:
     subdomain: win              # routes win.wam.app
     env:
       NODE_ENV: development
+  backend:
+    path: /Users/dan/code/wam/backend
+    command: npm run dev
+    port: 3000
+    subdomain: backend
+    node_version: "22.9"        # uses nvm to switch Node version before running
   frontend:
     path: /Users/dan/code/wam/frontend
     command: npm run dev
@@ -253,25 +280,37 @@ services:
     subdomain: ""               # empty = root domain (wam-platform.local)
 ```
 
+**`node_version`** (optional) — when set, the service command is wrapped with `bash -c '. "$NVM_DIR/nvm.sh" && nvm use <version> && <command>'`. Requires nvm installed at `$NVM_DIR` (defaults to `~/.nvm`). Accepts any version string nvm understands: `"22.9"`, `"20"`, `"lts"`, etc.
+
 ---
 
 ## SSL Certificate Strategy
 
-`core/ssl.rs::ensure_ssl(domain)` generates certs in this order:
+`core/ssl.rs::ensure_ssl(domain)` is always called from `tokio::task::spawn_blocking` — never on the async executor — to avoid blocking the event loop.
 
-1. **Already mkcert cert** — `.mkcert` marker file exists → skip, nothing to do
-2. **Upgrade rcgen → mkcert** — cert exists but no `.mkcert` marker and mkcert is available → delete old cert, regenerate with mkcert
-3. **mkcert** — `mkcert -cert-file ... -key-file ... domain *.domain` → CA-trusted, works with HSTS-preloaded TLDs (`.app`, `.dev`, etc.), no browser warnings
-4. **External cert** — copy from MAMP Pro / Homebrew nginx if found on disk
-5. **rcgen fallback** — pure-Rust self-signed cert; browser will warn for non-.local domains
+**Decision tree per domain:**
 
-### mkcert Installation
+1. **`.ca_installed` sentinel missing** → run `ensure_mkcert()` once: install mkcert binary if needed, run `mkcert -install` to trust the local CA, write sentinel. All subprocess output is suppressed.
+2. **Cert expires within 30 days** → delete and regenerate (checked via `openssl x509 -enddate`)
+3. **`.mkcert` marker exists** → cert already trusted, skip
+4. **Cert exists, no marker, mkcert available** → upgrade: delete old rcgen cert, regenerate with mkcert, write marker
+5. **No cert + mkcert available** → `mkcert -cert-file ... -key-file ... domain *.domain`, write `.mkcert` marker
+6. **No cert + external cert found** — copy from MAMP Pro / Homebrew nginx
+7. **Fallback** — `rcgen` self-signed (browser warns for non-.local domains)
 
-`install.sh` and `rundev setup` both install mkcert automatically:
-- **macOS**: `brew install mkcert nss` then `mkcert -install`
-- **Linux**: apt-get + binary download from dl.filippo.io then `mkcert -install`
+### SNI Cert Resolution
 
-`mkcert -install` adds the local CA to the system trust store (Keychain on macOS, NSS on Linux). This is what makes Chrome accept certs for real TLDs like `.app` and `.dev` without warnings.
+The HTTPS proxy reads certs from disk **on every TLS handshake** — no restart needed when certs are regenerated. For `win.wam.app`:
+1. Look for `win.wam.app.pem` (exact match)
+2. Fall back to `wam.app.pem` (wildcard `*.wam.app` covers subdomains)
+
+### mkcert Auto-Installation
+
+`install.sh` and `rundev setup` both install mkcert atomically before doing anything else:
+- **macOS**: `brew install mkcert nss && mkcert -install`
+- **Linux**: download binary from dl.filippo.io, `apt-get install libnss3-tools`, `mkcert -install`
+
+`ensure_ssl` also self-heals: if mkcert wasn't present at install time, it installs it on the first service start (guarded by `.ca_installed` sentinel so it only runs once).
 
 ---
 
@@ -332,7 +371,7 @@ When the user quits the TUI (`q`), services keep running. On next launch, `state
 
 ### 7. SNI-Based Multi-Domain TLS
 
-A single HTTPS listener on port 8443 serves certificates for all project domains using Server Name Indication. Certs are loaded at startup from the certs directory and matched by domain (including wildcard `*.domain`).
+A single HTTPS listener on port 1112 serves certificates for all service domains using Server Name Indication. `SniCertResolver` reads certs from disk on each handshake (no startup preload), so newly generated mkcert certs are picked up immediately. TLS handshakes have a 5-second timeout. ALPN is configured for `http/1.1` only (h2 was removed — the proxy handles HTTP/1.1 byte-level forwarding and advertising h2 caused binary frame corruption).
 
 ### 8. Personality-Driven UX
 
@@ -372,15 +411,16 @@ rundev logs [target]      # Hints to use TUI instead
 | `x` | Stop selected service |
 | `p` | Pause routing — removes domain from /etc/hosts, process keeps running |
 | `r` | Restart selected service |
+| `t` | Open `$SHELL` at service working dir (TUI suspends, resumes on exit) |
 | `f` | Execute auto-fix for crashed service |
-| `l` | Toggle log panel |
+| `l` | Toggle log panel (j/k or scroll wheel scrolls; newest lines at bottom) |
 | `/` | Focus command bar (ask Claude a question) |
 | `Tab` | Cycle panels |
 | `Esc` | Cancel/deselect/close |
 | `q` | Quit TUI (services keep running) |
 | `Q` | Quit and stop all services |
 
-Mouse: click rows to select/expand, scroll wheel for navigation.
+Mouse: click rows to select/expand, scroll wheel scrolls logs or navigates list.
 
 ---
 

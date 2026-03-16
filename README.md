@@ -216,6 +216,26 @@ The AI features are entirely optional. The app works perfectly without them. Dis
 
 See [`src/docs/ARCHITECTURE.md`](src/docs/ARCHITECTURE.md) for the full technical deep-dive — module structure, data flow diagrams, key types, and design decisions.
 
+## Per-Service Node Version
+
+If your services need different Node.js versions, add `node_version` to the service config. Run.dev wraps the start command with `nvm use <version>` automatically — no manual switching.
+
+```yaml
+services:
+  backend:
+    path: /Users/dan/code/myapp/backend
+    command: npm run dev
+    port: 3000
+    node_version: "22.9"       # uses nvm to switch before running
+  frontend:
+    path: /Users/dan/code/myapp/frontend
+    command: npm run dev
+    port: 5173
+    node_version: "20"         # different version, no problem
+```
+
+Requires [nvm](https://github.com/nvm-sh/nvm) installed at `$NVM_DIR` (defaults to `~/.nvm`). If `node_version` is omitted, the command runs with whatever Node is on your PATH.
+
 ## Config Files
 
 Everything lives in `~/.config/rundev/` (or `~/Library/Application Support/rundev/` on macOS):

@@ -204,13 +204,17 @@ impl AppState {
             let id = format!("{}/{}", config.name, svc_name);
             let working_dir = PathBuf::from(&svc_config.path);
 
+            // Wrap command with nvm if a node_version is specified
+            let command = wrap_command_with_nvm(&svc_config.command, &svc_config.node_version);
+
             let mut proc = ManagedProcess::new(
                 id.clone(),
-                svc_config.command.clone(),
+                command,
                 working_dir,
                 svc_config.port,
                 svc_config.env.clone(),
             );
+            proc.proxied = true;
 
             if let Some(&pid) = saved_pids.get(&id) {
                 if pid_exists(pid) {
@@ -320,10 +324,18 @@ pub async fn run_app(
         activate_port_forwarding();
 
         let rt = route_table.clone();
-        tokio::spawn(async move { let _ = run_proxy(rt, 1111).await; });
+        tokio::spawn(async move {
+            if let Err(e) = run_proxy(rt, 1111).await {
+                eprintln!("HTTP proxy failed: {}", e);
+            }
+        });
 
         let rt2 = route_table.clone();
-        tokio::spawn(async move { let _ = run_https_proxy(rt2, 1112).await; });
+        tokio::spawn(async move {
+            if let Err(e) = run_https_proxy(rt2, 1112).await {
+                eprintln!("HTTPS proxy failed: {}", e);
+            }
+        });
 
         state.proxy_running = true;
     }
@@ -368,10 +380,6 @@ pub async fn run_app(
             maybe_event = events.next() => {
                 if let Some(Ok(event)) = maybe_event {
                     handle_event(&mut state, event, &route_table).await?;
-                    // After wizard completes, sync proxy routes
-                    if !state.wizard.is_active() {
-                        sync_proxy_routes(&state, &route_table).await;
-                    }
                 }
             }
 
@@ -391,7 +399,11 @@ pub async fn run_app(
             }
             // Remove /etc/hosts entries and flush DNS so traffic returns to production
             let _ = cleanup_hosts();
-            break;
+            // Restore terminal before exit
+            let _ = crate::tui::restore();
+            // Force exit — proxy tasks run infinite accept loops that would
+            // prevent graceful tokio runtime shutdown, leaving the process alive.
+            std::process::exit(0);
         }
     }
 
@@ -441,9 +453,11 @@ async fn sync_process_states(state: &mut AppState) {
     let selected_proj = state.selected_project;
     let selected_svc = state.selected_service;
 
+    let mut respawn_list: Vec<SharedProcess> = Vec::new();
+
     for (pi, pv) in state.projects.iter_mut().enumerate() {
         for (si, shared) in pv.shared.iter().enumerate() {
-            let p = shared.lock().await;
+            let mut p = shared.lock().await;
             if let Some(proc) = pv.processes.get_mut(si) {
                 proc.status = p.status.clone();
                 proc.pid = p.pid;
@@ -461,8 +475,20 @@ async fn sync_process_states(state: &mut AppState) {
                         proc.combined_log = p.combined_log.clone();
                     }
                 }
+                // Check for EADDRINUSE auto-recovery respawn flag
+                if p.needs_respawn {
+                    p.needs_respawn = false;
+                    respawn_list.push(shared.clone());
+                }
             }
         }
+    }
+
+    // Respawn services that recovered from EADDRINUSE
+    for shared in respawn_list {
+        tokio::spawn(async move {
+            let _ = spawn_process(shared).await;
+        });
     }
 }
 
@@ -472,6 +498,23 @@ async fn stop_all_services(state: &AppState) {
         for s in &pv.shared {
             let _ = stop_process(s.clone()).await;
         }
+    }
+}
+
+/// Wrap a command with `nvm use <version>` if a node_version is specified.
+/// The resulting command runs through bash so nvm is available.
+fn wrap_command_with_nvm(command: &str, node_version: &Option<String>) -> String {
+    match node_version {
+        Some(version) if !version.is_empty() => {
+            // Source nvm and switch to the requested version before running the command.
+            // NVM_DIR is typically ~/.nvm; fall back to the standard location.
+            format!(
+                "bash -c 'export NVM_DIR=\"${{NVM_DIR:-$HOME/.nvm}}\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; nvm use {} && {}'",
+                version,
+                command.replace('\'', "'\\''"),
+            )
+        }
+        _ => command.to_string(),
     }
 }
 
@@ -915,6 +958,7 @@ async fn complete_add_service(
         port,
         subdomain: subdomain.clone(),
         env: HashMap::new(),
+        node_version: None,
     };
 
     // Update in-memory config

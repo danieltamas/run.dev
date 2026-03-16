@@ -21,6 +21,10 @@ pub struct ServiceConfig {
     pub subdomain: String,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Node.js version to use via nvm (e.g. "22.9", "20", "lts").
+    /// The command is wrapped with `. "$NVM_DIR/nvm.sh" && nvm use <version>`.
+    #[serde(default)]
+    pub node_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +178,7 @@ mod tests {
             port,
             subdomain: subdomain.to_string(),
             env: HashMap::new(),
+            node_version: None,
         }
     }
 

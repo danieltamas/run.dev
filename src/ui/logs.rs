@@ -18,8 +18,9 @@ use ratatui::{
 use crate::app::AppState;
 
 pub fn render_logs(f: &mut Frame, area: Rect, state: &AppState) {
+    let inner_width = area.width.saturating_sub(2) as usize; // minus left/right borders
     let visible = area.height.saturating_sub(2) as usize; // minus top/bottom borders
-    let logs = get_selected_logs(state, visible);
+    let logs = get_selected_logs(state, visible, inner_width);
     let title = get_selected_title(state);
 
     let items: Vec<ListItem> = logs
@@ -46,20 +47,34 @@ pub fn render_logs(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(list, area);
 }
 
-fn get_selected_logs(state: &AppState, visible: usize) -> Vec<String> {
+/// Wrap long lines to fit within `max_width`, then return the last `visible` wrapped lines.
+fn get_selected_logs(state: &AppState, visible: usize, max_width: usize) -> Vec<String> {
     if let Some(proj) = state.projects.get(state.selected_project) {
         let svc_idx = state.selected_service.unwrap_or(0);
         if let Some(proc) = proj.processes.get(svc_idx) {
             if proc.combined_log.is_empty() {
                 return vec!["  waiting for output…".to_string()];
             }
-            // Chronological order: oldest at top, newest at bottom — like a terminal.
-            // log_scroll is lines scrolled UP from the bottom (0 = show newest).
-            let logs: Vec<String> = proc.combined_log.iter().cloned().collect();
-            let total = logs.len();
+            // Wrap each log line to the panel width
+            let width = if max_width > 0 { max_width } else { 120 };
+            let mut wrapped: Vec<String> = Vec::new();
+            for raw in proc.combined_log.iter() {
+                if raw.len() <= width {
+                    wrapped.push(raw.clone());
+                } else {
+                    // Split at width boundaries
+                    let mut pos = 0;
+                    while pos < raw.len() {
+                        let end = (pos + width).min(raw.len());
+                        wrapped.push(raw[pos..end].to_string());
+                        pos = end;
+                    }
+                }
+            }
+            let total = wrapped.len();
             let end = total.saturating_sub(state.log_scroll);
             let start = end.saturating_sub(visible);
-            return logs[start..end].to_vec();
+            return wrapped[start..end].to_vec();
         }
     }
     vec!["  no logs available".to_string()]

@@ -155,11 +155,7 @@ async fn main() -> Result<()> {
                     let svc_count = p.services.len();
                     println!("  {}  ({})  {} service{}", p.name, p.domain, svc_count, if svc_count == 1 { "" } else { "s" });
                     for (name, svc) in &p.services {
-                        let subdomain = if svc.subdomain.is_empty() {
-                            p.domain.clone()
-                        } else {
-                            format!("{}.{}", svc.subdomain, p.domain)
-                        };
+                        let subdomain = core::config::resolve_domain(&svc.subdomain, &p.domain);
                         let scheme = if core::ssl::cert_exists(&p.domain) { "https" } else { "http" };
                         println!(
                             "    {}  {}://{}  localhost:{}",
@@ -215,11 +211,7 @@ fn cmd_status() {
     for proj in &projects {
         println!("{}  ({} services)", proj.domain, proj.services.len());
         for (name, svc) in &proj.services {
-            let subdomain = if svc.subdomain.is_empty() {
-                proj.domain.clone()
-            } else {
-                format!("{}.{}", svc.subdomain, proj.domain)
-            };
+            let subdomain = core::config::resolve_domain(&svc.subdomain, &proj.domain);
             let scheme = if core::ssl::cert_exists(&proj.domain) { "https" } else { "http" };
             let id = format!("{}/{}", proj.name, name);
             let icon = if state.pids.contains_key(&id) { "🟢" } else { "⚫" };

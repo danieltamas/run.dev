@@ -20,6 +20,9 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as StdCommandExt;
+
 use crate::core::config::state_path;
 
 const MAX_LOG_LINES: usize = 100;
@@ -70,6 +73,8 @@ pub struct ManagedProcess {
     pub cpu_percent: f32,
     pub memory_bytes: u64,
     pub proxied: bool,
+    /// Set by crash handler when EADDRINUSE is detected; app loop should respawn.
+    pub needs_respawn: bool,
 }
 
 impl ManagedProcess {
@@ -96,14 +101,20 @@ impl ManagedProcess {
             cpu_percent: 0.0,
             memory_bytes: 0,
             proxied: false,
+            needs_respawn: false,
         }
     }
 
     pub fn push_stderr(&mut self, line: String) {
-        // Also scan stderr — many frameworks log "ready on :PORT" to stderr
-        if self.combined_log.len() < 50 {
+        // Auto-detect port from output when no port is configured yet.
+        // Once port is found (non-zero), this stops naturally.
+        if self.port == 0 {
             if let Some(p) = detect_port_in_line(&line) {
                 self.port = p;
+                // Port detected — service is now actually ready
+                if self.status == ProcessStatus::Starting {
+                    self.status = ProcessStatus::Running;
+                }
             }
         }
         if self.last_stderr.len() >= MAX_LOG_LINES {
@@ -114,10 +125,12 @@ impl ManagedProcess {
     }
 
     pub fn push_stdout(&mut self, line: String) {
-        // Auto-detect port from the first 50 lines of output
-        if self.combined_log.len() < 50 {
+        if self.port == 0 {
             if let Some(p) = detect_port_in_line(&line) {
                 self.port = p;
+                if self.status == ProcessStatus::Starting {
+                    self.status = ProcessStatus::Running;
+                }
             }
         }
         if self.stdout_log.len() >= MAX_LOG_LINES {
@@ -154,15 +167,21 @@ pub type SharedProcess = Arc<Mutex<ManagedProcess>>;
 /// Waits up to 500ms for it to exit, then SIGKILLs if needed.
 #[cfg(unix)]
 pub async fn kill_port(port: u16) {
+    // Only kill processes LISTENING on this port — not every process with a
+    // connection to it.  The old `lsof -ti :PORT` also matched rundev's own
+    // proxy connections, which killed the entire TUI on restart.
     let output = tokio::process::Command::new("lsof")
-        .args(["-ti", &format!(":{}", port)])
+        .args(["-ti", &format!("TCP:{}", port), "-sTCP:LISTEN"])
         .output()
         .await;
+
+    let my_pid = std::process::id();
 
     if let Ok(output) = output {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for pid_str in stdout.split_whitespace() {
             if let Ok(pid) = pid_str.parse::<u32>() {
+                if pid == my_pid { continue; } // never kill ourselves
                 unsafe { libc::kill(pid as i32, libc::SIGTERM) };
             }
         }
@@ -171,6 +190,7 @@ pub async fn kill_port(port: u16) {
         // SIGKILL stragglers
         for pid_str in stdout.split_whitespace() {
             if let Ok(pid) = pid_str.parse::<u32>() {
+                if pid == my_pid { continue; }
                 if pid_exists(pid) {
                     unsafe { libc::kill(pid as i32, libc::SIGKILL) };
                 }
@@ -228,8 +248,10 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         .args(&args)
         .current_dir(&working_dir)
         .envs(&env)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0) // Create new process group so we can kill the entire tree
         .spawn()?;
 
     let pid = child.id().unwrap_or(0);
@@ -237,7 +259,13 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     {
         let mut p = proc.lock().await;
         p.pid = Some(pid);
-        p.status = ProcessStatus::Running;
+        // If we already know the port, the service is effectively running.
+        // Otherwise stay in Starting until port is auto-detected from output.
+        p.status = if p.port > 0 {
+            ProcessStatus::Running
+        } else {
+            ProcessStatus::Starting
+        };
         p.started_at = Some(Utc::now());
     }
 
@@ -276,23 +304,19 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
             let exit_code = exit_status.ok().and_then(|s| s.code()).unwrap_or(-1);
             let stderr_tail = p.stderr_tail(20);
 
-            // Auto-recover from EADDRINUSE: kill the port hog and restart once
+            // Auto-recover from EADDRINUSE: kill the port hog and flag for respawn
             if p.crash_count == 0
                 && (stderr_tail.contains("EADDRINUSE") || stderr_tail.contains("address already in use"))
             {
-                // Extract port from stderr
                 let port = extract_port_from_eaddrinuse(&stderr_tail).unwrap_or(p.port);
                 if port > 0 {
                     p.crash_count += 1;
                     p.pid = None;
                     p.status = ProcessStatus::Stopped;
+                    p.needs_respawn = true;
                     remove_pid(&id_clone);
-                    drop(p); // release lock before async work
+                    drop(p);
                     kill_port(port).await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    // Retry in a new task to satisfy Send bounds
-                    let pc = proc_clone.clone();
-                    tokio::spawn(async move { let _ = spawn_process(pc).await; });
                     return;
                 }
             }
@@ -341,13 +365,22 @@ pub async fn restart_process(proc: SharedProcess) -> Result<()> {
         let mut p = proc.lock().await;
         p.status = ProcessStatus::Starting;
         p.pid = None;
+        p.combined_log.clear();
+        p.last_stderr.clear();
     }
 
     spawn_process(proc).await
 }
 
 async fn kill_pid(pid: u32) {
-    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    // Try process-group kill first (catches npm→node child trees), fall back
+    // to single-pid if the group doesn't exist.
+    let pgid = -(pid as i32);
+    let ret = unsafe { libc::kill(pgid, libc::SIGTERM) };
+    if ret != 0 {
+        // Process group kill failed — kill the single process instead
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
 
     for _ in 0..50 {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -356,7 +389,10 @@ async fn kill_pid(pid: u32) {
         }
     }
 
-    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    let ret = unsafe { libc::kill(pgid, libc::SIGKILL) };
+    if ret != 0 {
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    }
 }
 
 pub fn pid_exists(pid: u32) -> bool {
@@ -446,9 +482,11 @@ pub fn detect_port_in_line(line: &str) -> Option<u16> {
         }
     }
 
-    // Check keyword + number patterns
+    // Check keyword + number patterns (covers Express, Fastify, Koa, Django, Rails, etc.)
     for kw in &["port ", "port=", "port:", "listening on ", "running on ",
-                "ready on ", "started on ", "server on ", "available at "] {
+                "ready on ", "started on ", "server on ", "available at ",
+                "listening at ", "bound to ", "serving on ", "started at ",
+                "live on ", "accessible at ", "running at "] {
         if let Some(pos) = lower.find(kw) {
             let after = &line[pos + kw.len()..];
             let digits: String = after.chars()

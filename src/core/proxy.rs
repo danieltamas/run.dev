@@ -12,10 +12,9 @@ use anyhow::Result;
 use rustls::ServerConfig;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
 
 #[derive(Debug, Clone)]
@@ -35,7 +34,7 @@ pub async fn run_proxy(routes: RouteTable, listen_port: u16) -> Result<()> {
             Ok((stream, _addr)) => {
                 let routes = routes.clone();
                 tokio::spawn(async move {
-                    let _ = handle_connection(stream, routes).await;
+                    let _ = handle_connection(stream, routes, false).await;
                 });
             }
             Err(e) => {
@@ -53,9 +52,13 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
         return Ok(());
     }
 
-    let tls_config = ServerConfig::builder()
+    let mut tls_config = ServerConfig::builder()
         .with_no_client_auth()
         .with_cert_resolver(Arc::new(resolver));
+    // Only advertise HTTP/1.1 — we don't implement HTTP/2 framing, so
+    // negotiating h2 would cause the browser to send binary frames that
+    // our text-based header parser can't handle (random failures, corruption).
+    tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port)).await?;
@@ -67,9 +70,14 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
                 let acceptor = acceptor.clone();
                 let routes = routes.clone();
                 tokio::spawn(async move {
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => { let _ = handle_connection(tls_stream, routes).await; }
-                        Err(_) => {} // TLS handshake failed (e.g. unknown SNI) — ignore
+                    // Timeout the TLS handshake so bad clients don't hold connections forever
+                    let tls_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        acceptor.accept(stream),
+                    ).await;
+                    match tls_result {
+                        Ok(Ok(tls_stream)) => { let _ = handle_connection(tls_stream, routes, true).await; }
+                        _ => {} // TLS handshake failed or timed out — ignore
                     }
                 });
             }
@@ -80,102 +88,260 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
     }
 }
 
-async fn handle_connection<S>(mut client: S, routes: RouteTable) -> Result<()>
+async fn handle_connection<S>(mut client: S, routes: RouteTable, is_tls: bool) -> Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    // Read the HTTP request to get the Host header
-    let mut buf = vec![0u8; 16384];
-    let n = client.read(&mut buf).await?;
-    if n == 0 {
-        return Ok(());
-    }
+    // Process requests one at a time so every request gets proper header injection.
+    // With blind bidirectional copy, keep-alive requests after the first would bypass
+    // header injection entirely — causing DPoP, CORS, and X-Forwarded-Proto failures.
+    let mut buf = vec![0u8; 65536];
+    // leftover holds body bytes from the previous read that belong to the next request
+    let mut leftover_start = 0usize;
+    let mut leftover_end = 0usize;
 
-    let request = &buf[..n];
+    loop {
+        // ── Read complete HTTP headers (\r\n\r\n) ──────────────────────────────
+        // Seed the buffer with any leftover bytes from the previous request cycle
+        let mut filled = leftover_end - leftover_start;
+        if filled > 0 {
+            buf.copy_within(leftover_start..leftover_end, 0);
+        }
+        leftover_start = 0;
+        leftover_end = 0;
 
-    // Debug status page — curl http://localhost:1111/__run
-    if request.starts_with(b"GET /__run") {
-        let table = routes.read().await;
-        let body = if table.is_empty() {
-            "run.dev proxy: no routes registered yet (services still starting?)\n".to_string()
-        } else {
-            let lines: Vec<String> = table.iter()
-                .map(|r| format!("  {} -> :{}", r.domain, r.target_port))
-                .collect();
-            format!("run.dev proxy routes:\n{}\n", lines.join("\n"))
-        };
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(), body
-        );
-        let _ = client.write_all(response.as_bytes()).await;
-        return Ok(());
-    }
+        let deadline = std::time::Duration::from_secs(30);
+        let mut found_headers_end = false;
 
-    let host = extract_host_header(request);
-
-    // Find matching route
-    let (target_port, route_table_dump) = {
-        let table = routes.read().await;
-        let port = find_route(&table, host.as_deref());
-        let dump: Vec<String> = table.iter()
-            .map(|r| format!("{}:{}", r.domain, r.target_port))
-            .collect();
-        (port, dump)
-    };
-
-    let target_port = match target_port {
-        Some(p) => p,
-        None => {
-            let body = format!(
-                "run.dev proxy: no route for '{}'\nknown routes: {}",
-                host.as_deref().unwrap_or("(no host header)"),
-                if route_table_dump.is_empty() {
-                    "none yet — service may still be starting".to_string()
-                } else {
-                    route_table_dump.join(", ")
+        loop {
+            // Check if we already have the end-of-headers marker in existing data
+            if filled >= 4 {
+                let search_start = if filled > 4 { filled - 4 } else { 0 };
+                // Actually search all of filled since leftover data might contain it
+                if buf[..filled].windows(4).any(|w| w == b"\r\n\r\n") {
+                    found_headers_end = true;
+                    break;
                 }
-            );
+                let _ = search_start; // suppress warning
+            }
+
+            if filled >= buf.len() {
+                break; // headers exceed 64 KB — forward as-is
+            }
+            let n = match tokio::time::timeout(deadline, client.read(&mut buf[filled..])).await {
+                Ok(Ok(n)) if n > 0 => n,
+                _ => {
+                    if filled == 0 { return Ok(()); } // clean close or timeout
+                    // Client closed mid-headers or timed out — forward what we have
+                    found_headers_end = true;
+                    break;
+                }
+            };
+            filled += n;
+        }
+
+        if filled == 0 {
+            return Ok(()); // client closed connection
+        }
+
+        let request_data = &buf[..filled];
+
+        // ── Debug status page ──────────────────────────────────────────────────
+        if request_data.starts_with(b"GET /__run") {
+            let body = {
+                let table = routes.read().unwrap();
+                if table.is_empty() {
+                    "run.dev proxy: no routes registered yet (services still starting?)\n".to_string()
+                } else {
+                    let lines: Vec<String> = table.iter()
+                        .map(|r| format!("  {} -> :{}", r.domain, r.target_port))
+                        .collect();
+                    format!("run.dev proxy routes:\n{}\n", lines.join("\n"))
+                }
+            };
             let response = format!(
-                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(), body
             );
             let _ = client.write_all(response.as_bytes()).await;
             return Ok(());
         }
-    };
 
-    // Connect to target service — return 503 if it's not up yet
-    let mut upstream = match TcpStream::connect(format!("127.0.0.1:{}", target_port)).await {
-        Ok(s) => s,
-        Err(e) => {
-            let body = format!(
-                "run.dev proxy: service '{}' is not reachable on port {}\nerror: {}",
-                host.as_deref().unwrap_or("?"), target_port, e
-            );
-            let response = format!(
-                "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
-            );
-            let _ = client.write_all(response.as_bytes()).await;
+        let host = extract_host_header(request_data);
+
+        // ── HTTP→HTTPS redirect ────────────────────────────────────────────────
+        if !is_tls {
+            if let Some(ref h) = host {
+                if crate::core::ssl::cert_exists(h) || {
+                    h.find('.').map(|i| crate::core::ssl::cert_exists(&h[i+1..])).unwrap_or(false)
+                } {
+                    let path = extract_request_path(request_data);
+                    let location = format!("https://{}{}", h, path);
+                    let body = format!("Redirecting to {}", location);
+                    let response = format!(
+                        "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: {}\r\n\r\n{}",
+                        location, body.len(), body
+                    );
+                    let _ = client.write_all(response.as_bytes()).await;
+                    return Ok(());
+                }
+            }
+        }
+
+        // ── Route lookup ───────────────────────────────────────────────────────
+        let (target_port, route_table_dump) = {
+            let table = routes.read().unwrap();
+            let port = find_route(&table, host.as_deref());
+            let dump: Vec<String> = table.iter()
+                .map(|r| format!("{}:{}", r.domain, r.target_port))
+                .collect();
+            (port, dump)
+        };
+
+        let target_port = match target_port {
+            Some(p) => p,
+            None => {
+                let body = format!(
+                    "run.dev proxy: no route for '{}'\nknown routes: {}",
+                    host.as_deref().unwrap_or("(no host header)"),
+                    if route_table_dump.is_empty() {
+                        "none yet — service may still be starting".to_string()
+                    } else {
+                        route_table_dump.join(", ")
+                    }
+                );
+                let response = format!(
+                    "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body
+                );
+                let _ = client.write_all(response.as_bytes()).await;
+                return Ok(());
+            }
+        };
+
+        // ── Connect upstream ───────────────────────────────────────────────────
+        let mut upstream = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            TcpStream::connect(format!("127.0.0.1:{}", target_port)),
+        ).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                let body = format!(
+                    "run.dev proxy: service '{}' is not reachable on port {}\nerror: {}",
+                    host.as_deref().unwrap_or("?"), target_port, e
+                );
+                let response = format!(
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body
+                );
+                let _ = client.write_all(response.as_bytes()).await;
+                return Ok(());
+            }
+            Err(_) => {
+                let body = format!(
+                    "run.dev proxy: connection to '{}' port {} timed out",
+                    host.as_deref().unwrap_or("?"), target_port
+                );
+                let response = format!(
+                    "HTTP/1.1 504 Gateway Timeout\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body
+                );
+                let _ = client.write_all(response.as_bytes()).await;
+                return Ok(());
+            }
+        };
+
+        // ── Inject proxy headers + Connection: close ───────────────────────────
+        // Connection: close ensures upstream closes after responding, so we can
+        // cleanly detect the response boundary and loop for the next request.
+        let modified = inject_proxy_headers(request_data, is_tls, host.as_deref());
+        upstream.write_all(&modified).await?;
+
+        // ── Forward remaining request body from client to upstream ──────────────
+        // Determine body length from Content-Length header (if present).
+        // The initial buffer may contain some or all of the body already.
+        let headers_end_pos = request_data.windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4);
+
+        let content_length = extract_content_length(request_data);
+        let body_in_buffer = headers_end_pos
+            .map(|hep| filled.saturating_sub(hep))
+            .unwrap_or(0);
+        let remaining_body = content_length
+            .unwrap_or(0)
+            .saturating_sub(body_in_buffer);
+
+        // Forward remaining body bytes from client
+        if remaining_body > 0 {
+            let mut left = remaining_body;
+            let mut tmp = vec![0u8; 65536];
+            while left > 0 {
+                let to_read = left.min(tmp.len());
+                let n = match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    client.read(&mut tmp[..to_read]),
+                ).await {
+                    Ok(Ok(n)) if n > 0 => n,
+                    _ => break,
+                };
+                upstream.write_all(&tmp[..n]).await?;
+                left -= n;
+            }
+        }
+
+        // ── Read response from upstream and forward to client ──────────────────
+        // Read until upstream closes the connection (Connection: close guarantees this).
+        let mut resp_buf = vec![0u8; 65536];
+        loop {
+            let n = match tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                upstream.read(&mut resp_buf),
+            ).await {
+                Ok(Ok(n)) if n > 0 => n,
+                _ => break, // upstream closed or timeout
+            };
+            if client.write_all(&resp_buf[..n]).await.is_err() {
+                return Ok(()); // client disconnected
+            }
+        }
+
+        // If the client sent Connection: close, we're done
+        if has_connection_close(request_data) {
             return Ok(());
         }
+
+        // Otherwise loop to handle the next request on this keep-alive connection.
+        // Reset leftover tracking (no leftover body data in current design).
+        leftover_start = 0;
+        leftover_end = 0;
+    }
+}
+
+/// Inject X-Forwarded-* headers into the HTTP request before forwarding upstream.
+/// Finds the end of the first header line (\r\n) and inserts proxy headers there.
+fn inject_proxy_headers(request: &[u8], is_tls: bool, host: Option<&str>) -> Vec<u8> {
+    // Find the first \r\n (end of request line) to insert headers after it
+    let header_end = request.windows(2).position(|w| w == b"\r\n");
+    let Some(first_crlf) = header_end else {
+        return request.to_vec();
     };
 
-    // Forward the initial request bytes
-    upstream.write_all(request).await?;
-
-    // Bidirectional pipe — use copy_bidirectional so neither direction is
-    // dropped prematurely (a bare `select!` would cancel the slower half).
-    let (mut client_read, mut client_write) = tokio::io::split(client);
-    let (mut upstream_read, mut upstream_write) = upstream.split();
-
-    let _result = tokio::try_join!(
-        tokio::io::copy(&mut client_read, &mut upstream_write),
-        tokio::io::copy(&mut upstream_read, &mut client_write),
+    let proto = if is_tls { "https" } else { "http" };
+    let mut extra_headers = format!(
+        "X-Forwarded-Proto: {}\r\nX-Forwarded-For: 127.0.0.1\r\nX-Real-IP: 127.0.0.1\r\n",
+        proto
     );
+    if let Some(h) = host {
+        extra_headers.push_str(&format!("X-Forwarded-Host: {}\r\n", h));
+    }
 
-    Ok(())
+    let insert_pos = first_crlf + 2; // after the first \r\n
+    let mut result = Vec::with_capacity(request.len() + extra_headers.len());
+    result.extend_from_slice(&request[..insert_pos]);
+    result.extend_from_slice(extra_headers.as_bytes());
+    result.extend_from_slice(&request[insert_pos..]);
+    result
 }
 
 // ── SNI cert resolver ──────────────────────────────────────────────────────────
@@ -258,6 +424,18 @@ fn load_certified_key(
     Some(Arc::new(CertifiedKey::new(cert_chain, signing_key)))
 }
 
+/// Extract the request path from the HTTP request line (e.g. "GET /foo HTTP/1.1" → "/foo")
+fn extract_request_path(request: &[u8]) -> String {
+    let text = std::str::from_utf8(request).unwrap_or("");
+    if let Some(line) = text.lines().next() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            return parts[1].to_string();
+        }
+    }
+    "/".to_string()
+}
+
 fn extract_host_header(request: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(request).ok()?;
     for line in text.lines() {
@@ -296,55 +474,40 @@ pub fn activate_port_forwarding() {
 
 #[cfg(target_os = "macos")]
 fn activate_pf() {
-    const PF_ANCHOR: &str = "/etc/pf.anchors/rundev";
-    const PF_CONF: &str = "/etc/pf.conf";
-
     let rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 1111\n\
                  rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112\n";
 
-    // Only rewrite anchor if the rules have changed (avoids unnecessary sudo prompts)
-    let current = std::fs::read_to_string(PF_ANCHOR).unwrap_or_default();
-    if current.trim() != rules.trim() {
-        let tmp = std::env::temp_dir().join("rundev-pf-anchor");
+    // Check current nat rules — only reload if stale or missing
+    let check = std::process::Command::new("sudo")
+        .args(["-n", "pfctl", "-s", "nat"])
+        .output();
+    let needs_update = match &check {
+        Ok(output) => {
+            let current = String::from_utf8_lossy(&output.stdout);
+            !current.contains("port 1111") || !current.contains("port 1112")
+                || current.contains("8080") || current.contains("8443")
+        }
+        Err(_) => true,
+    };
+
+    if needs_update {
+        // Flush stale nat rules first
+        let _ = std::process::Command::new("sudo")
+            .args(["-n", "pfctl", "-F", "nat"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        // Merge rdr rules directly into the main ruleset (bypasses anchor ordering issues)
+        let tmp = std::env::temp_dir().join("rundev-pf-rdr");
         if std::fs::write(&tmp, rules).is_ok() {
             let _ = std::process::Command::new("sudo")
-                .args(["-n", "cp", &tmp.to_string_lossy(), PF_ANCHOR])
+                .args(["-n", "pfctl", "-mf", &tmp.to_string_lossy()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
             let _ = std::fs::remove_file(&tmp);
         }
-    }
-
-    // Ensure pf.conf references the rundev rdr-anchor — without this the anchor rules never fire
-    let pf_content = std::fs::read_to_string(PF_CONF).unwrap_or_default();
-    if !pf_content.contains("rdr-anchor \"rundev\"") {
-        let addition = "\n# run.dev port forwarding\nrdr-anchor \"rundev\"\nanchor \"rundev\"\n";
-        let new_content = format!("{}{}", pf_content.trim_end(), addition);
-        let tmp = std::env::temp_dir().join("rundev-pf-conf");
-        if std::fs::write(&tmp, &new_content).is_ok() {
-            let _ = std::process::Command::new("sudo")
-                .args(["-n", "cp", &tmp.to_string_lossy(), PF_CONF])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            let _ = std::fs::remove_file(&tmp);
-        }
-        // Reload full pf config so the new rdr-anchor directive takes effect
-        let _ = std::process::Command::new("sudo")
-            .args(["-n", "pfctl", "-ef", PF_CONF])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
-
-    // Load run.dev's anchor rules
-    if std::path::Path::new(PF_ANCHOR).exists() {
-        let _ = std::process::Command::new("sudo")
-            .args(["-n", "pfctl", "-a", "rundev", "-f", PF_ANCHOR])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
     }
 }
 
@@ -457,7 +620,7 @@ pub fn new_route_table() -> RouteTable {
 }
 
 pub async fn update_routes(table: &RouteTable, new_routes: Vec<ProxyRoute>) {
-    let mut t = table.write().await;
+    let mut t = table.write().unwrap();
     *t = new_routes;
 }
 
@@ -534,7 +697,7 @@ mod tests {
         let table = new_route_table();
         update_routes(&table, vec![route("a.local", 3000)]).await;
         update_routes(&table, vec![route("b.local", 4000)]).await;
-        let t = table.read().await;
+        let t = table.read().unwrap();
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].domain, "b.local");
     }
