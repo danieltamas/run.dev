@@ -37,27 +37,28 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
 - **Personality** — run.dev has moods. When everything works: 😎 *vibing*. When stuff crashes: 💀 *flatlined*
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                                      😎 vibing          │
-│  r u n . d e v                       3 projects         │
-│                                      7 services running │
-│                                                         │
-│                                      j/k navigate       │
-│                                      a add  s start     │
-│                                      x stop r restart   │
-├─────────────────────────────────────────────────────────┤
-│  ▼ wam-platform.local                            😎     │
-│    ● api        https://api.wam-platform.local   38M 2% │
-│    ● frontend   https://wam-platform.local       62M 3% │
-│    ● workers    http://localhost:4100             11M 0% │
-│  ▶ side-project.local                            😌     │
-│  ▼ that-thing-steve-wrote.local                  🤒     │
-│    ● backend    https://that-thing-steve-wrote…  44M 1% │
-│    ✗ cron       bro, cron is ded. port 3000 is taken.   │
-│                 press [f] to let me fix it               │
-├─────────────────────────────────────────────────────────┤
-│  / ask claude something...                               │
-└─────────────────────────────────────────────────────────┘
+  ██████╗ ██╗   ██╗███╗   ██╗  ██████╗ ███████╗██╗   ██╗
+  ██╔══██╗██║   ██║████╗  ██║  ██╔══██╗██╔════╝██║   ██║     3/4 services  vibing
+  ██████╔╝██║   ██║██╔██╗ ██║  ██║  ██║█████╗  ██║   ██║
+  ██╔══██╗██║   ██║██║╚██╗██║  ██║  ██║██╔══╝  ╚██╗ ██╔╝     [a] add service  [n] new project
+  ██║  ██║╚██████╔╝██║ ╚████║  ██████╔╝███████╗ ╚████╔╝      [s] start  [x] stop  [r] restart
+  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝       [/] ask the AI anything
+
+  Daniel Tamas
+  hello@danieltamas.com                                       2 projects  configured  v0.1.0
+
+  projects ────────────────────────────────────────────────────────────────────────
+          service                            url                       local           mem   cpu
+
+  v WAM  2 services
+  | * win.wam.app                          https://win.wam.app       localhost:5111   42M  0.0%
+  | * api.wam.app                          https://api.wam.app       localhost:4000   38M  2.1%
+  v side-project  1 service
+  | x backend       bro, backend is ded. port 3000 is already taken.
+  |                 press [f] to let me fix it
+
+  ────────────────────────────────────────────────────────────────────────────────
+  / ask claude something...
 ```
 
 ## Install
