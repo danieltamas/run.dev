@@ -23,7 +23,7 @@ impl ResourceMonitor {
     }
 
     pub async fn update(&mut self, processes: &[SharedProcess]) {
-        // Collect PIDs first, then refresh only those processes — not the entire system
+        // Collect PIDs first
         let mut pids: Vec<(usize, Pid)> = Vec::new();
         for (i, proc) in processes.iter().enumerate() {
             let p = proc.lock().await;
@@ -32,18 +32,16 @@ impl ResourceMonitor {
             }
         }
 
-        if !pids.is_empty() {
-            let pid_refs: Vec<Pid> = pids.iter().map(|(_, pid)| *pid).collect();
-            self.system.refresh_processes(ProcessesToUpdate::Some(&pid_refs));
-        }
+        // Refresh ALL processes so we can walk the child tree.
+        // This is slightly more expensive than refreshing specific PIDs, but
+        // it's the only way to find child processes (yarn→node, sh→node, etc.)
+        // whose CPU/memory we need to sum up.
+        self.system.refresh_processes(ProcessesToUpdate::All);
 
         for (i, proc) in processes.iter().enumerate() {
-            if let Some((_, sysinfo_pid)) = pids.iter().find(|(idx, _)| *idx == i) {
-                let (cpu, mem) = if let Some(process) = self.system.process(*sysinfo_pid) {
-                    (process.cpu_usage(), process.memory())
-                } else {
-                    (0.0, 0)
-                };
+            if let Some((_, root_pid)) = pids.iter().find(|(idx, _)| *idx == i) {
+                // Sum CPU and memory across the entire process tree
+                let (cpu, mem) = self.sum_process_tree(*root_pid);
                 let mut p = proc.lock().await;
                 p.cpu_percent = cpu;
                 p.memory_bytes = mem;
@@ -53,6 +51,30 @@ impl ResourceMonitor {
                 p.memory_bytes = 0;
             }
         }
+    }
+
+    /// Sum cpu_usage and memory for a process and all its descendants.
+    fn sum_process_tree(&self, root: Pid) -> (f32, u64) {
+        let mut cpu = 0.0f32;
+        let mut mem = 0u64;
+
+        if let Some(p) = self.system.process(root) {
+            cpu += p.cpu_usage();
+            mem += p.memory();
+        }
+
+        // Walk all processes to find children (sysinfo doesn't provide a tree API)
+        for (pid, process) in self.system.processes() {
+            if let Some(parent) = process.parent() {
+                if parent == root && *pid != root {
+                    let (child_cpu, child_mem) = self.sum_process_tree(*pid);
+                    cpu += child_cpu;
+                    mem += child_mem;
+                }
+            }
+        }
+
+        (cpu, mem)
     }
 }
 

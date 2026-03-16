@@ -178,7 +178,7 @@ Domains live at the **service level**, not the project level. Each service indep
 ```
 Browser: https://win.wam.app/path
     │
-    ├── DNS: /etc/hosts maps win.wam.app → 127.0.0.1
+    ├── DNS: /etc/hosts → 127.0.0.1 + ::1 (blocks both IPv4 and IPv6 production)
     ├── Port forward: pfctl (macOS) or iptables (Linux) — 443 → 1112
     ├── HTTPS proxy (127.0.0.1:1112)
     │     ├── TLS handshake (5s timeout) — SNI resolver reads cert from disk:
@@ -355,7 +355,7 @@ The `ai` feature (default: on) gates `reqwest` and Claude integration. When disa
 
 ### 3. Privileged Helper for /etc/hosts
 
-Instead of requiring `sudo` on every hosts update, a small shell script (`/usr/local/bin/rundev-hosts-helper`) is installed once with a NOPASSWD sudoers rule. The app pipes new hosts content to it via stdin.
+Instead of requiring `sudo` on every hosts update, a small shell script (`/usr/local/bin/rundev-hosts-helper`) is installed once with a NOPASSWD sudoers rule. The app pipes new hosts content to it via stdin. After writing, the helper flushes the DNS cache (macOS: `dscacheutil -flushcache` + `killall -HUP mDNSResponder`, Linux: `resolvectl flush-caches`).
 
 ### 4. Ring Buffer Logs
 
@@ -369,11 +369,17 @@ The `RouteTable` is updated in-place as services start/stop. No proxy restart ne
 
 When the user quits the TUI (`q`), services keep running. On next launch, `state.json` is read and orphaned PIDs are cleaned up. This enables a "background mode" workflow.
 
-### 7. SNI-Based Multi-Domain TLS
+### 7. IPv4 + IPv6 Hosts Entries
+
+Every managed domain gets both `127.0.0.1` (IPv4) and `::1` (IPv6) entries in `/etc/hosts`. Without the IPv6 entry, browsers using Happy Eyeballs (RFC 6555) may prefer a cached production IPv6 address over the local IPv4 entry, routing traffic to production despite the hosts file.
+
+> **Note:** Chrome with "Use secure DNS" enabled (DNS-over-HTTPS) bypasses `/etc/hosts` entirely. Users with DoH-compatible DNS servers (1.1.1.1, 8.8.8.8) should disable Secure DNS in `chrome://settings/security` for local domains to resolve correctly.
+
+### 8. SNI-Based Multi-Domain TLS
 
 A single HTTPS listener on port 1112 serves certificates for all service domains using Server Name Indication. `SniCertResolver` reads certs from disk on each handshake (no startup preload), so newly generated mkcert certs are picked up immediately. TLS handshakes have a 5-second timeout. ALPN is configured for `http/1.1` only (h2 was removed — the proxy handles HTTP/1.1 byte-level forwarding and advertising h2 caused binary frame corruption).
 
-### 8. Personality-Driven UX
+### 9. Personality-Driven UX
 
 Error messages use a casual tone with actionable suggestions:
 - `"bro, api is ded. port 4000 is already taken. press [f] to let me fix it"`
@@ -382,6 +388,8 @@ Error messages use a casual tone with actionable suggestions:
 ---
 
 ## CLI Commands
+
+Both `rundev` and `run.dev` work (symlink installed by `make install` / `install.sh`).
 
 ```
 rundev                    # Open TUI dashboard

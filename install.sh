@@ -138,6 +138,7 @@ install_rundev_binary() {
         wait $! 2>/dev/null || fail "Download failed"
         chmod +x /tmp/rundev-bin
         sudo mv /tmp/rundev-bin "$INSTALL_DIR/rundev"
+        sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
         ok "run.dev installed"
         return
     fi
@@ -162,6 +163,7 @@ install_rundev_binary() {
     fi
 
     sudo cp target/release/rundev "$INSTALL_DIR/rundev"
+    sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
     ok "run.dev built and installed"
 }
 
@@ -233,8 +235,8 @@ setup_port_forwarding() {
     if [[ "$OS" == "macos" ]]; then
         # Write pfctl anchor for 80→8080 and 443→8443
         PF_ANCHOR="/etc/pf.anchors/rundev"
-        PF_RULES="rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 8080
-rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443"
+        PF_RULES="rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 1111
+rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112"
 
         TMP_ANCHOR="$(mktemp)"
         printf '%s\n' "$PF_RULES" > "$TMP_ANCHOR"
@@ -247,13 +249,13 @@ rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443"
         fi
 
         sudo pfctl -ef "$PF_ANCHOR" &>/dev/null 2>&1 || true
-        ok "Port forwarding: pfctl rules installed (80→8080, 443→8443)"
+        ok "Port forwarding: pfctl rules installed (80→1111, 443→1112)"
     else
         # Linux: iptables redirect
-        sudo iptables -t nat -C OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080 2>/dev/null || \
-            sudo iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 8080 2>/dev/null || true
-        sudo iptables -t nat -C OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443 2>/dev/null || \
-            sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443 2>/dev/null || true
+        sudo iptables -t nat -C OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || \
+            sudo iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || true
+        sudo iptables -t nat -C OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || \
+            sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || true
 
         # Persist via iptables-save if available
         if command -v iptables-save &>/dev/null; then
@@ -261,7 +263,7 @@ rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443"
             sudo sh -c 'iptables-save > /etc/iptables/rules.v4' 2>/dev/null || true
         fi
 
-        ok "Port forwarding: iptables rules installed (80→8080, 443→8443)"
+        ok "Port forwarding: iptables rules installed (80→1111, 443→1112)"
     fi
 }
 
@@ -309,7 +311,7 @@ print_done() {
     echo ""
     echo -e "  ${GREEN}${BOLD}✨ run.dev is ready!${NC}"
     echo ""
-    echo -e "  Run ${BOLD}rundev${NC} to open the dashboard."
+    echo -e "  Run ${BOLD}rundev${NC} or ${BOLD}run.dev${NC} to open the dashboard."
     echo ""
 }
 

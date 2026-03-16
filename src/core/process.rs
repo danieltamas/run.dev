@@ -244,10 +244,17 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         p.status = ProcessStatus::Starting;
     }
 
+    // Local dev services talk to themselves over HTTPS with mkcert certs.
+    // Node.js doesn't trust the mkcert CA by default, causing server-to-server
+    // requests (e.g. nuxt-auth session checks) to fail with "Failed to fetch".
+    let mut full_env = env.clone();
+    full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
+        .or_insert_with(|| "0".to_string());
+
     let mut child = tokio::process::Command::new(program)
         .args(&args)
         .current_dir(&working_dir)
-        .envs(&env)
+        .envs(&full_env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -332,12 +339,14 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
 }
 
 pub async fn stop_process(proc: SharedProcess) -> Result<()> {
-    let (pid, id) = {
+    let (pid, port, id) = {
         let mut p = proc.lock().await;
         let pid = p.pid.take();
+        let port = p.port;
         let id = p.id.clone();
         p.status = ProcessStatus::Stopped;
-        (pid, id)
+        p.port = 0;
+        (pid, port, id)
     };
 
     if let Some(pid) = pid {
@@ -345,18 +354,28 @@ pub async fn stop_process(proc: SharedProcess) -> Result<()> {
         remove_pid(&id);
     }
 
+    // Kill anything still holding the port (child processes that survived SIGTERM)
+    if port > 0 {
+        kill_port(port).await;
+    }
+
     Ok(())
 }
 
 pub async fn restart_process(proc: SharedProcess) -> Result<()> {
-    {
+    let (pid, port) = {
         let mut p = proc.lock().await;
         p.status = ProcessStatus::Restarting;
-    }
+        (p.pid, p.port)
+    };
 
-    let pid = proc.lock().await.pid;
     if let Some(pid) = pid {
         kill_pid(pid).await;
+    }
+
+    // Also kill anything still holding the port (child processes that survived SIGTERM)
+    if port > 0 {
+        kill_port(port).await;
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -365,6 +384,7 @@ pub async fn restart_process(proc: SharedProcess) -> Result<()> {
         let mut p = proc.lock().await;
         p.status = ProcessStatus::Starting;
         p.pid = None;
+        p.port = 0; // Reset — will be re-detected from stdout/stderr
         p.combined_log.clear();
         p.last_stderr.clear();
     }
@@ -613,5 +633,127 @@ mod tests {
         p.push_stderr("only line".to_string());
         let tail = p.stderr_tail(10);
         assert_eq!(tail, "only line");
+    }
+
+    // ── detect_port_in_line ─────────────────────────────────────────────────
+
+    #[test]
+    fn detect_port_localhost_colon() {
+        assert_eq!(detect_port_in_line("  Local: http://localhost:5111/"), Some(5111));
+    }
+
+    #[test]
+    fn detect_port_zero_addr() {
+        assert_eq!(detect_port_in_line("Listening on 0.0.0.0:3000"), Some(3000));
+    }
+
+    #[test]
+    fn detect_port_127_addr() {
+        assert_eq!(detect_port_in_line("http://127.0.0.1:4000"), Some(4000));
+    }
+
+    #[test]
+    fn detect_port_triple_colon() {
+        assert_eq!(detect_port_in_line("Listening on :::8898"), Some(8898));
+    }
+
+    #[test]
+    fn detect_port_keyword_listening_on() {
+        assert_eq!(detect_port_in_line("Server listening on port 5173"), Some(5173));
+    }
+
+    #[test]
+    fn detect_port_keyword_port_equals() {
+        assert_eq!(detect_port_in_line("PORT=4000"), Some(4000));
+    }
+
+    #[test]
+    fn detect_port_keyword_ready_on() {
+        assert_eq!(detect_port_in_line("ready on 3001"), Some(3001));
+    }
+
+    #[test]
+    fn detect_port_keyword_running_at() {
+        assert_eq!(detect_port_in_line("running at http://localhost:5111"), Some(5111));
+    }
+
+    #[test]
+    fn detect_port_rejects_privileged_ports() {
+        // Ports <= 1024 are filtered out to avoid false positives
+        assert_eq!(detect_port_in_line("localhost:80"), None);
+        assert_eq!(detect_port_in_line("localhost:443"), None);
+    }
+
+    #[test]
+    fn detect_port_rejects_out_of_range() {
+        assert_eq!(detect_port_in_line("localhost:65535"), None);
+        assert_eq!(detect_port_in_line("localhost:70000"), None);
+    }
+
+    #[test]
+    fn detect_port_no_false_positive_timestamp() {
+        // Timestamps like "12:34:56" shouldn't match
+        assert_eq!(detect_port_in_line("2026-03-16 12:34:56 INFO started"), None);
+    }
+
+    #[test]
+    fn detect_port_no_false_positive_random_text() {
+        assert_eq!(detect_port_in_line("Compiling rundev v0.1.0"), None);
+    }
+
+    #[test]
+    fn detect_port_nuxt_output() {
+        assert_eq!(
+            detect_port_in_line("  ➜ Local:    http://localhost:3000/"),
+            Some(3000),
+        );
+    }
+
+    #[test]
+    fn detect_port_express_output() {
+        assert_eq!(
+            detect_port_in_line("Express server listening on port 8898"),
+            Some(8898),
+        );
+    }
+
+    // ── push_stdout / push_stderr auto-detect port + status transition ──────
+
+    #[test]
+    fn push_stdout_detects_port_and_transitions_to_running() {
+        let mut p = make_proc("t/t");
+        p.port = 0;
+        p.status = ProcessStatus::Starting;
+        p.push_stdout("Listening on http://localhost:4567".to_string());
+        assert_eq!(p.port, 4567);
+        assert_eq!(p.status, ProcessStatus::Running);
+    }
+
+    #[test]
+    fn push_stderr_detects_port_and_transitions_to_running() {
+        let mut p = make_proc("t/t");
+        p.port = 0;
+        p.status = ProcessStatus::Starting;
+        p.push_stderr("Server ready on port 9090".to_string());
+        assert_eq!(p.port, 9090);
+        assert_eq!(p.status, ProcessStatus::Running);
+    }
+
+    #[test]
+    fn push_stdout_does_not_overwrite_known_port() {
+        let mut p = make_proc("t/t");
+        p.port = 3000; // already known
+        p.push_stdout("Now listening on port 9999".to_string());
+        assert_eq!(p.port, 3000, "should not overwrite a known port");
+    }
+
+    #[test]
+    fn push_stdout_no_port_stays_starting() {
+        let mut p = make_proc("t/t");
+        p.port = 0;
+        p.status = ProcessStatus::Starting;
+        p.push_stdout("Compiling...".to_string());
+        assert_eq!(p.port, 0);
+        assert_eq!(p.status, ProcessStatus::Starting);
     }
 }

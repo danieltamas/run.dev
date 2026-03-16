@@ -43,7 +43,8 @@ install:
 			cat $(LOG); \
 			exit 1; \
 		fi
-	@printf "  $(GREEN)✓$(NC)  run.dev installed — run $(BOLD)rundev$(NC) to start\n\n"
+	@ln -sf "$$HOME/.cargo/bin/rundev" "$$HOME/.cargo/bin/run.dev" 2>/dev/null || true
+	@printf "  $(GREEN)✓$(NC)  run.dev installed — run $(BOLD)rundev$(NC) or $(BOLD)run.dev$(NC) to start\n\n"
 
 build:
 	@printf "\n  $(CYAN)→$(NC)  Building run.dev (debug)...\n"

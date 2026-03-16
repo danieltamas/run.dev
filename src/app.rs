@@ -394,13 +394,8 @@ pub async fn run_app(
         }
 
         if state.should_quit {
-            if state.quit_stop_all {
-                stop_all_services(&state).await;
-            }
-            // Remove /etc/hosts entries and flush DNS so traffic returns to production
-            let _ = cleanup_hosts();
-            // Restore terminal before exit
-            let _ = crate::tui::restore();
+            // Show shutdown screen while stopping services
+            graceful_shutdown(terminal, &state).await;
             // Force exit — proxy tasks run infinite accept loops that would
             // prevent graceful tokio runtime shutdown, leaving the process alive.
             std::process::exit(0);
@@ -424,16 +419,79 @@ async fn shell_out(
         req.service_name
     );
 
-    // Spawn interactive shell at the service's working directory
+    // Spawn interactive shell with a custom prompt so the user always
+    // knows they're inside a run.dev sub-shell.
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let _ = tokio::process::Command::new(&shell)
-        .current_dir(&req.working_dir)
+    let shell_name = std::path::Path::new(&shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("sh")
+        .to_string();
+
+    // Build a tiny rc file that sources the user's config then overrides the prompt
+    let tmp_rc = std::env::temp_dir().join(format!("rundev-shell-{}.rc", std::process::id()));
+    let mut shell_args: Vec<String> = Vec::new();
+    let mut extra_env: Vec<(String, String)> = Vec::new();
+
+    match shell_name.as_str() {
+        "zsh" => {
+            // For zsh: create a temp ZDOTDIR with a .zshrc that sources user's then sets PROMPT
+            let zdotdir = std::env::temp_dir().join(format!("rundev-zsh-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&zdotdir);
+            let zshrc = zdotdir.join(".zshrc");
+            let user_rc = dirs::home_dir()
+                .map(|h| h.join(".zshrc"))
+                .unwrap_or_default();
+            let rc_content = format!(
+                "[ -f \"{}\" ] && source \"{}\"\nPROMPT=$'\\e[48;5;31m\\e[97m run.dev:{} \\e[0m '\"$PROMPT\"\n",
+                user_rc.display(),
+                user_rc.display(),
+                req.service_name
+            );
+            let _ = std::fs::write(&zshrc, rc_content);
+            extra_env.push(("ZDOTDIR".to_string(), zdotdir.display().to_string()));
+        }
+        "bash" => {
+            // For bash: --rcfile with a custom rc
+            let user_rc = dirs::home_dir()
+                .map(|h| h.join(".bashrc"))
+                .unwrap_or_default();
+            let rc_content = format!(
+                "[ -f \"{}\" ] && source \"{}\"\nPS1=\"\\[\\e[48;5;31m\\e[97m\\] run.dev:{} \\[\\e[0m\\] $PS1\"\n",
+                user_rc.display(),
+                user_rc.display(),
+                req.service_name
+            );
+            let _ = std::fs::write(&tmp_rc, rc_content);
+            shell_args.push("--rcfile".to_string());
+            shell_args.push(tmp_rc.display().to_string());
+        }
+        _ => {
+            // Fallback: set PS1 env var (works for sh and most POSIX shells)
+            extra_env.push(("PS1".to_string(), format!(
+                "\x1b[48;5;31m\x1b[97m run.dev:{} \x1b[0m $ ",
+                req.service_name
+            )));
+        }
+    }
+
+    let mut cmd = tokio::process::Command::new(&shell);
+    cmd.current_dir(&req.working_dir)
         .envs(&req.env)
+        .envs(extra_env.clone())
+        .args(&shell_args)
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .await;
+        .stderr(std::process::Stdio::inherit());
+
+    let _ = cmd.status().await;
+
+    // Clean up temp files
+    let _ = std::fs::remove_file(&tmp_rc);
+    if shell_name == "zsh" {
+        let zdotdir = std::env::temp_dir().join(format!("rundev-zsh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&zdotdir);
+    }
 
     // Resume TUI
     crossterm::terminal::enable_raw_mode()?;
@@ -492,6 +550,101 @@ async fn sync_process_states(state: &mut AppState) {
     }
 }
 
+
+async fn graceful_shutdown(terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>, state: &AppState) {
+    use ratatui::layout::{Constraint, Layout, Alignment};
+    use ratatui::style::{Color, Style, Modifier};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph, Padding};
+
+    // Collect service names and their shared handles
+    let mut services: Vec<(String, SharedProcess)> = Vec::new();
+    for pv in &state.projects {
+        for (i, proc) in pv.processes.iter().enumerate() {
+            if proc.pid.is_some() {
+                if let Some(shared) = pv.shared.get(i) {
+                    services.push((proc.id.clone(), shared.clone()));
+                }
+            }
+        }
+    }
+
+    let total = services.len();
+
+    for (idx, (name, shared)) in services.iter().enumerate() {
+        // Render shutdown progress
+        let _ = terminal.draw(|f| {
+            let area = f.area();
+
+            let banner_style = Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD);
+            let dim_style = Style::default().fg(Color::DarkGray);
+            let done_style = Style::default().fg(Color::Green);
+            let active_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+
+            let mut lines: Vec<Line> = Vec::new();
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("  run.dev is shutting down  ", banner_style)));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  Stopping services ({}/{})...", idx + 1, total),
+                dim_style,
+            )));
+            lines.push(Line::from(""));
+
+            // Show each service with a status indicator
+            for (j, (svc_name, _)) in services.iter().enumerate() {
+                let short = svc_name.split('/').last().unwrap_or(svc_name);
+                let line = if j < idx {
+                    Line::from(Span::styled(format!("  [x] {}", short), done_style))
+                } else if j == idx {
+                    Line::from(Span::styled(format!("  [-] {} stopping...", short), active_style))
+                } else {
+                    Line::from(Span::styled(format!("  [ ] {}", short), dim_style))
+                };
+                lines.push(line);
+            }
+
+            let paragraph = Paragraph::new(lines)
+                .block(Block::default().padding(Padding::new(2, 2, 1, 1)));
+            f.render_widget(paragraph, area);
+        });
+
+        let _ = stop_process(shared.clone()).await;
+    }
+
+    // Final frame: all done
+    let _ = terminal.draw(|f| {
+        let area = f.area();
+        let banner_style = Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD);
+        let done_style = Style::default().fg(Color::Green);
+
+        let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  run.dev is shutting down  ", banner_style)));
+        lines.push(Line::from(""));
+
+        for (svc_name, _) in &services {
+            let short = svc_name.split('/').last().unwrap_or(svc_name);
+            lines.push(Line::from(Span::styled(format!("  [x] {}", short), done_style)));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  Cleaning up DNS...", Style::default().fg(Color::DarkGray))));
+
+        let paragraph = Paragraph::new(lines)
+            .block(Block::default().padding(Padding::new(2, 2, 1, 1)));
+        f.render_widget(paragraph, area);
+    });
+
+    // Clean up hosts and DNS
+    let _ = cleanup_hosts();
+
+    // Brief pause so the user sees the final state
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Restore terminal
+    let _ = crate::tui::restore();
+}
 
 async fn stop_all_services(state: &AppState) {
     for pv in &state.projects {
@@ -595,7 +748,13 @@ async fn handle_event(
                 handle_key(state, key).await?;
             }
         }
-        Event::Mouse(mouse) => handle_mouse(state, mouse),
+        Event::Mouse(mouse) => {
+            // Catch any panic from mouse handling (e.g. index out of bounds
+            // from rapid clicks/drags) so it doesn't crash the whole app.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle_mouse(state, mouse);
+            }));
+        }
         _ => {}
     }
     Ok(())
@@ -1623,5 +1782,47 @@ fn autocomplete_path(input: &str) -> String {
                 input.to_string()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── wrap_command_with_nvm ────────────────────────────────────────────────
+
+    #[test]
+    fn nvm_none_returns_command_unchanged() {
+        let result = wrap_command_with_nvm("npm run dev", &None);
+        assert_eq!(result, "npm run dev");
+    }
+
+    #[test]
+    fn nvm_empty_string_returns_command_unchanged() {
+        let result = wrap_command_with_nvm("npm run dev", &Some("".to_string()));
+        assert_eq!(result, "npm run dev");
+    }
+
+    #[test]
+    fn nvm_version_wraps_command() {
+        let result = wrap_command_with_nvm("npm run dev", &Some("22.9".to_string()));
+        assert!(result.contains("nvm use 22.9"));
+        assert!(result.contains("npm run dev"));
+        assert!(result.starts_with("bash -c '"));
+        assert!(result.contains("NVM_DIR"));
+    }
+
+    #[test]
+    fn nvm_escapes_single_quotes_in_command() {
+        let result = wrap_command_with_nvm("echo 'hello world'", &Some("20".to_string()));
+        assert!(result.contains("nvm use 20"));
+        // Single quotes in the command should be escaped
+        assert!(result.contains("'\\''"));
+    }
+
+    #[test]
+    fn nvm_lts_version() {
+        let result = wrap_command_with_nvm("npm start", &Some("lts".to_string()));
+        assert!(result.contains("nvm use lts"));
     }
 }

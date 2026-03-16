@@ -280,6 +280,56 @@ mod tests {
         assert!(s.env.is_empty());
     }
 
+    // ── resolve_domain ──────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_domain_empty_subdomain_returns_project() {
+        assert_eq!(resolve_domain("", "myapp.local"), "myapp.local");
+    }
+
+    #[test]
+    fn resolve_domain_simple_subdomain_prepends() {
+        assert_eq!(resolve_domain("api", "myapp.local"), "api.myapp.local");
+    }
+
+    #[test]
+    fn resolve_domain_fqdn_returned_as_is() {
+        assert_eq!(resolve_domain("win.wam.app", "wam.local"), "win.wam.app");
+    }
+
+    #[test]
+    fn resolve_domain_dotted_subdomain_is_fqdn() {
+        assert_eq!(resolve_domain("backend.wam.app", "wam.local"), "backend.wam.app");
+    }
+
+    // ── all_domains with fqdn service names ─────────────────────────────────
+
+    #[test]
+    fn all_domains_includes_fqdn_service_names() {
+        let p = project_with_services(
+            "wam.local",
+            vec![("win.wam.app", service(5111, "win.wam.app"))],
+        );
+        let domains = p.all_domains();
+        assert!(domains.contains(&"win.wam.app".to_string()));
+    }
+
+    // ── node_version serialization ──────────────────────────────────────────
+
+    #[test]
+    fn node_version_none_by_default() {
+        let yaml = "path: /tmp\ncommand: npm start\nport: 3000\nsubdomain: api\n";
+        let s: ServiceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(s.node_version, None);
+    }
+
+    #[test]
+    fn node_version_deserializes() {
+        let yaml = "path: /tmp\ncommand: npm start\nport: 3000\nsubdomain: api\nnode_version: '22.9'\n";
+        let s: ServiceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(s.node_version, Some("22.9".to_string()));
+    }
+
     fn timestamp() -> u64 {
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64

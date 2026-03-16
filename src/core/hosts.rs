@@ -104,10 +104,9 @@ fn generate_block(domains: &[(String, Vec<String>)], existing_hosts: &str) -> St
             .filter(|d| !has_external_entry(d, existing_hosts))
             .collect();
         if !to_add.is_empty() {
-            lines.push(format!(
-                "127.0.0.1  {}",
-                to_add.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
-            ));
+            let joined = to_add.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
+            lines.push(format!("127.0.0.1  {}", joined));
+            lines.push(format!("::1        {}", joined));
         }
     }
     lines.push(VIBE_MARKER_END.to_string());
@@ -139,6 +138,7 @@ mod tests {
         assert!(block.contains(VIBE_MARKER_START));
         assert!(block.contains(VIBE_MARKER_END));
         assert!(block.contains("127.0.0.1  myapp.local"));
+        assert!(block.contains("::1        myapp.local"));
     }
 
     #[test]
@@ -242,6 +242,7 @@ mod tests {
 fn write_hosts(content: &str) -> Result<()> {
     // Try direct write first (works if rundev is run as root, or /etc/hosts is writable)
     if std::fs::write(HOSTS_PATH, content).is_ok() {
+        flush_dns();
         return Ok(());
     }
 
@@ -249,6 +250,7 @@ fn write_hosts(content: &str) -> Result<()> {
     // The helper reads new hosts content from stdin and writes to /etc/hosts.
     // A sudoers NOPASSWD rule for this specific binary is installed once at setup time,
     // so `sudo rundev-hosts-helper` never prompts after that.
+    // The helper also flushes DNS, but we flush again below to be safe.
     if std::path::Path::new(HELPER_PATH).exists() {
         use std::io::Write;
         use std::process::Stdio;
@@ -266,6 +268,7 @@ fn write_hosts(content: &str) -> Result<()> {
 
         let status = child.wait().context("rundev-hosts-helper did not complete")?;
         if status.success() {
+            flush_dns();
             return Ok(());
         }
     }
@@ -273,4 +276,29 @@ fn write_hosts(content: &str) -> Result<()> {
     anyhow::bail!(
         "Cannot write to /etc/hosts.\nRun `run setup` to install the privileged helper (one-time, no future prompts)."
     )
+}
+
+/// Flush the OS DNS cache so /etc/hosts changes take effect immediately.
+fn flush_dns() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("dscacheutil")
+            .arg("-flushcache")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = std::process::Command::new("killall")
+            .args(["-HUP", "mDNSResponder"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("resolvectl")
+            .arg("flush-caches")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }

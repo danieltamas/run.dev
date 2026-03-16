@@ -29,8 +29,8 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
 
 - **A nice dashboard** — see every project and service at a glance, start/stop with a keystroke
 - **Automatic local domains** — `api.myapp.local`, `frontend.myapp.local`, with real HTTPS
-- **Zero-config SSL** — self-signed certs generated in pure Rust. No `mkcert`, no OpenSSL, no drama
-- **Reverse proxy** — SNI-based routing from pretty URLs to `localhost:whatever`
+- **Zero-config SSL** — mkcert-trusted certs, with rcgen fallback. No manual cert management
+- **Reverse proxy** — SNI-based routing with WebSocket support, from pretty URLs to `localhost:whatever`
 - **Process management** — spawn, monitor, restart. CPU and RAM stats per service, live
 - **Smart project scanning** — point it at a folder, it figures out `npm run dev` vs `cargo run` vs `go run .`
 - **AI crash diagnosis** — when something dies, Claude reads the stderr and tells you what went wrong
@@ -70,9 +70,9 @@ curl -fsSL https://getrun.dev/install.sh | bash
 ```
 
 This will:
-1. Download (or build from source) the `rundev` binary
-2. Install a tiny `/etc/hosts` helper (one-time `sudo`, never again)
-3. Set up port forwarding (80 → 8080, 443 → 8443)
+1. Download (or build from source) the `rundev` binary (also installs `run.dev` as an alias)
+2. Install a tiny privileged helper for `/etc/hosts` and `/etc/resolver/` (one-time `sudo`, never again)
+3. Set up port forwarding (80 → 1111, 443 → 1112)
 
 **Or build it yourself:**
 
@@ -87,8 +87,9 @@ make install
 ## Quick Start
 
 ```bash
-# Launch the dashboard
+# Launch the dashboard (both commands work)
 rundev
+run.dev
 
 # Press [a] to create a project → give it a name → get a .local domain
 # Press [a] again on the project → point it at a folder
@@ -102,9 +103,9 @@ rundev
 Browser                   Run.dev                       Your services
   │                          │                              │
   │  https://api.myapp.local │                              │
-  ├─────────────────────────►│  /etc/hosts → 127.0.0.1     │
-  │                          │  port 443 → 8443 (pfctl)    │
-  │                          │  SNI → pick SSL cert        │
+  ├─────────────────────────►│  /etc/hosts → 127.0.0.1 + ::1     │
+  │                          │  port 443 → 1112 (pfctl)    │
+  │                          │  TLS + SNI → pick SSL cert   │
   │                          │  Host header → route lookup  │
   │                          ├─────────────────────────────►│ localhost:4000
   │                          │◄─────────────────────────────┤
@@ -115,6 +116,8 @@ Browser                   Run.dev                       Your services
 No Docker network. No Traefik. No nginx.conf. Just a binary that manages your processes and routes your traffic.
 
 ## CLI
+
+Both `rundev` and `run.dev` work as the command name.
 
 ```bash
 rundev                    # Open the TUI dashboard
@@ -261,7 +264,10 @@ No. Press `q` and they keep running in the background. Next time you open run.de
 Run.dev manages processes directly — it doesn't orchestrate containers. If your service runs with a shell command, run.dev can manage it. If it only runs in Docker, you'd run `docker compose up` as the service command.
 
 **Do I need to trust the self-signed certs?**
-For local dev, most browsers will let you click through the warning once. If you want full green padlock trust, add the generated cert to your system keychain.
+Run.dev uses mkcert to generate locally-trusted certs — green padlock out of the box, no manual trust needed. If mkcert isn't available, it falls back to rcgen self-signed certs (browsers will show a warning you can click through once).
+
+**Does it work with Chrome's DNS-over-HTTPS?**
+Chrome with "Use secure DNS" enabled bypasses `/etc/hosts` entirely. If your local domains aren't resolving, go to `chrome://settings/security` and disable "Use secure DNS". Safari, Firefox, curl, and all other tools work out of the box — run.dev writes both IPv4 and IPv6 entries to prevent Happy Eyeballs from falling back to production addresses.
 
 **What about Windows?**
 Not yet. macOS and Linux only. WSL might work but isn't tested.
