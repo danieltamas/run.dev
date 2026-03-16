@@ -96,33 +96,16 @@ where
     // With blind bidirectional copy, keep-alive requests after the first would bypass
     // header injection entirely — causing DPoP, CORS, and X-Forwarded-Proto failures.
     let mut buf = vec![0u8; 65536];
-    // leftover holds body bytes from the previous read that belong to the next request
-    let mut leftover_start = 0usize;
-    let mut leftover_end = 0usize;
 
     loop {
         // ── Read complete HTTP headers (\r\n\r\n) ──────────────────────────────
-        // Seed the buffer with any leftover bytes from the previous request cycle
-        let mut filled = leftover_end - leftover_start;
-        if filled > 0 {
-            buf.copy_within(leftover_start..leftover_end, 0);
-        }
-        leftover_start = 0;
-        leftover_end = 0;
-
+        let mut filled = 0usize;
         let deadline = std::time::Duration::from_secs(30);
-        let mut found_headers_end = false;
 
         loop {
             // Check if we already have the end-of-headers marker in existing data
-            if filled >= 4 {
-                let search_start = if filled > 4 { filled - 4 } else { 0 };
-                // Actually search all of filled since leftover data might contain it
-                if buf[..filled].windows(4).any(|w| w == b"\r\n\r\n") {
-                    found_headers_end = true;
-                    break;
-                }
-                let _ = search_start; // suppress warning
+            if filled >= 4 && buf[..filled].windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
             }
 
             if filled >= buf.len() {
@@ -132,8 +115,6 @@ where
                 Ok(Ok(n)) if n > 0 => n,
                 _ => {
                     if filled == 0 { return Ok(()); } // clean close or timeout
-                    // Client closed mid-headers or timed out — forward what we have
-                    found_headers_end = true;
                     break;
                 }
             };
@@ -312,14 +293,12 @@ where
         }
 
         // Otherwise loop to handle the next request on this keep-alive connection.
-        // Reset leftover tracking (no leftover body data in current design).
-        leftover_start = 0;
-        leftover_end = 0;
     }
 }
 
-/// Inject X-Forwarded-* headers into the HTTP request before forwarding upstream.
-/// Finds the end of the first header line (\r\n) and inserts proxy headers there.
+/// Inject X-Forwarded-* headers and force Connection: close for upstream.
+/// Connection: close ensures the upstream closes after responding, letting the
+/// proxy detect the response boundary and loop back for the next keep-alive request.
 fn inject_proxy_headers(request: &[u8], is_tls: bool, host: Option<&str>) -> Vec<u8> {
     // Find the first \r\n (end of request line) to insert headers after it
     let header_end = request.windows(2).position(|w| w == b"\r\n");
@@ -329,19 +308,75 @@ fn inject_proxy_headers(request: &[u8], is_tls: bool, host: Option<&str>) -> Vec
 
     let proto = if is_tls { "https" } else { "http" };
     let mut extra_headers = format!(
-        "X-Forwarded-Proto: {}\r\nX-Forwarded-For: 127.0.0.1\r\nX-Real-IP: 127.0.0.1\r\n",
+        "Connection: close\r\nX-Forwarded-Proto: {}\r\nX-Forwarded-For: 127.0.0.1\r\nX-Real-IP: 127.0.0.1\r\n",
         proto
     );
     if let Some(h) = host {
         extra_headers.push_str(&format!("X-Forwarded-Host: {}\r\n", h));
     }
 
+    // Strip existing Connection header to avoid conflicts with our Connection: close
+    let cleaned = strip_header(request, b"connection:");
+
     let insert_pos = first_crlf + 2; // after the first \r\n
-    let mut result = Vec::with_capacity(request.len() + extra_headers.len());
-    result.extend_from_slice(&request[..insert_pos]);
+    // Adjust insert position if we stripped a header before this point
+    let actual_insert = cleaned.windows(2).position(|w| w == b"\r\n")
+        .map(|p| p + 2)
+        .unwrap_or(insert_pos);
+
+    let mut result = Vec::with_capacity(cleaned.len() + extra_headers.len());
+    result.extend_from_slice(&cleaned[..actual_insert]);
     result.extend_from_slice(extra_headers.as_bytes());
-    result.extend_from_slice(&request[insert_pos..]);
+    result.extend_from_slice(&cleaned[actual_insert..]);
     result
+}
+
+/// Remove a header line (case-insensitive) from raw HTTP request bytes.
+fn strip_header(request: &[u8], header_lower: &[u8]) -> Vec<u8> {
+    let text = match std::str::from_utf8(request) {
+        Ok(t) => t,
+        Err(_) => return request.to_vec(),
+    };
+
+    let mut result = Vec::with_capacity(request.len());
+    for line in text.split("\r\n") {
+        if line.to_ascii_lowercase().as_bytes().starts_with(header_lower) {
+            continue; // skip this header
+        }
+        if !result.is_empty() || line.contains("HTTP/") {
+            if !result.is_empty() {
+                result.extend_from_slice(b"\r\n");
+            }
+            result.extend_from_slice(line.as_bytes());
+        }
+    }
+    result
+}
+
+/// Extract Content-Length value from raw HTTP request bytes.
+fn extract_content_length(request: &[u8]) -> Option<usize> {
+    let text = std::str::from_utf8(request).ok()?;
+    for line in text.lines() {
+        if line.to_ascii_lowercase().starts_with("content-length:") {
+            return line[15..].trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// Check if the request has Connection: close.
+fn has_connection_close(request: &[u8]) -> bool {
+    let text = match std::str::from_utf8(request) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("connection:") && lower.contains("close") {
+            return true;
+        }
+    }
+    false
 }
 
 // ── SNI cert resolver ──────────────────────────────────────────────────────────
