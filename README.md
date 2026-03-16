@@ -205,7 +205,7 @@ Run.dev is built to work with [Claude Code](https://docs.anthropic.com/en/docs/c
 - **Live debug sessions** — press `/` in the dashboard, ask Claude anything about your running services. It knows your project structure, your routes, your ports — it answers in context
 - **Auto-fix suggestions** — for common errors (port conflicts, missing modules, connection failures), run.dev suggests a fix. Press `[f]` and it handles it
 
-Run.dev talks to Claude Code through a local proxy — your code and logs never leave your machine.
+Run.dev talks to Claude Code — your code and logs never leave your machine.
 
 Configure it in `~/.config/rundev/config.yaml`:
 

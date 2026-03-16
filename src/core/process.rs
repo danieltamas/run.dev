@@ -73,6 +73,10 @@ pub struct ManagedProcess {
     pub cpu_percent: f32,
     pub memory_bytes: u64,
     pub proxied: bool,
+    /// Bytes received through proxy (request data from clients).
+    pub net_in: u64,
+    /// Bytes sent through proxy (response data to clients).
+    pub net_out: u64,
     /// Set by crash handler when EADDRINUSE is detected; app loop should respawn.
     pub needs_respawn: bool,
 }
@@ -101,6 +105,8 @@ impl ManagedProcess {
             cpu_percent: 0.0,
             memory_bytes: 0,
             proxied: false,
+            net_in: 0,
+            net_out: 0,
             needs_respawn: false,
         }
     }

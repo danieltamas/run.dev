@@ -338,11 +338,12 @@ fn support_message() -> (&'static str, &'static str, usize, bool) {
 // Fixed widths for the right-side stats columns
 const COL_URL:     usize = 30;
 const COL_LOCAL:   usize = 14;
+const COL_NET:     usize =  6; // "1.2G" / "128M" / "42K"
 const COL_MEM:     usize =  5;
 const COL_CPU:     usize =  5;
-const COL_RPAD:    usize =  3; // right-edge padding so last column isn't flush against the border
-// spacers: " " + "  " + "  " + " " = 6
-const RIGHT_TOTAL: usize = COL_URL + 2 + COL_LOCAL + 2 + COL_MEM + 1 + COL_CPU + COL_RPAD; // 62
+const COL_RPAD:    usize =  3;
+// spacers between columns
+const RIGHT_TOTAL: usize = COL_URL + 2 + COL_LOCAL + 2 + COL_NET + 1 + COL_NET + 2 + COL_MEM + 1 + COL_CPU + COL_RPAD;
 
 fn render_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
     // Inner width available to List items (subtract 2 for borders)
@@ -369,6 +370,10 @@ fn render_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
         Span::styled(format!("{:<width$}", "url", width = COL_URL), hdr),
         Span::styled("  ", hdr),
         Span::styled(format!("{:<width$}", "local", width = COL_LOCAL), hdr),
+        Span::styled("  ", hdr),
+        Span::styled(format!("{:>width$}", "in", width = COL_NET), hdr),
+        Span::styled(" ", hdr),
+        Span::styled(format!("{:>width$}", "out", width = COL_NET), hdr),
         Span::styled("  ", hdr),
         Span::styled(format!("{:>width$}", "mem", width = COL_MEM), hdr),
         Span::styled(" ", hdr),
@@ -487,6 +492,19 @@ fn render_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
                 row_spans.push(Span::styled(
                     format!("{:<width$}", local_url, width = COL_LOCAL),
                     Style::default().fg(Color::DarkGray),
+                ));
+                let net_in_str = format_bytes(proc.net_in);
+                let net_out_str = format_bytes(proc.net_out);
+
+                row_spans.push(Span::styled("  ", Style::default()));
+                row_spans.push(Span::styled(
+                    format!("{:>width$}", net_in_str, width = COL_NET),
+                    Style::default().fg(Color::Blue),
+                ));
+                row_spans.push(Span::styled(" ", Style::default()));
+                row_spans.push(Span::styled(
+                    format!("{:>width$}", net_out_str, width = COL_NET),
+                    Style::default().fg(Color::Magenta),
                 ));
                 row_spans.push(Span::styled("  ", Style::default()));
                 row_spans.push(Span::styled(

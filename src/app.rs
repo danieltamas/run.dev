@@ -372,6 +372,7 @@ pub async fn run_app(
                         .flat_map(|p| p.shared.iter().cloned())
                         .collect();
                     resource_monitor.update(&all_shared).await;
+                    sync_traffic_stats(&mut state, &route_table).await;
                     // Re-sync proxy routes so auto-detected ports take effect
                     sync_proxy_routes(&state, &route_table).await;
                 }
@@ -724,11 +725,33 @@ async fn sync_proxy_routes(state: &AppState, route_table: &RouteTable) {
                 .filter(|&p| p > 0)
                 .unwrap_or(svc.port);
             if target_port > 0 {
-                routes.push(ProxyRoute { domain, target_port });
+                routes.push(ProxyRoute::new(domain, target_port));
             }
         }
     }
     update_routes(route_table, routes).await;
+}
+
+/// Copy byte counters from the proxy route table into each process for display.
+async fn sync_traffic_stats(state: &mut AppState, route_table: &RouteTable) {
+    let table = route_table.read().unwrap();
+    for pv in &mut state.projects {
+        for proc in &mut pv.processes {
+            let svc_name = proc.id.split('/').last().unwrap_or(&proc.id);
+            let svc_config = pv.config.services.get(svc_name);
+            if let Some(svc) = svc_config {
+                let domain = if svc.subdomain.is_empty() && svc_name.contains('.') {
+                    svc_name.to_string()
+                } else {
+                    crate::core::config::resolve_domain(&svc.subdomain, &pv.config.domain)
+                };
+                if let Some(route) = table.iter().find(|r| r.domain == domain) {
+                    proc.net_in = route.bytes_in.load(std::sync::atomic::Ordering::Relaxed);
+                    proc.net_out = route.bytes_out.load(std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+    }
 }
 
 // ── Event routing ──────────────────────────────────────────────────────────────

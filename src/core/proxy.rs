@@ -13,14 +13,51 @@ use rustls::ServerConfig;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
-#[derive(Debug, Clone)]
 pub struct ProxyRoute {
     pub domain: String,
     pub target_port: u16,
+    /// Bytes received from the client (request bodies, headers).
+    pub bytes_in: Arc<AtomicU64>,
+    /// Bytes sent to the client (response bodies, headers).
+    pub bytes_out: Arc<AtomicU64>,
+}
+
+impl Clone for ProxyRoute {
+    fn clone(&self) -> Self {
+        Self {
+            domain: self.domain.clone(),
+            target_port: self.target_port,
+            bytes_in: self.bytes_in.clone(),
+            bytes_out: self.bytes_out.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ProxyRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProxyRoute")
+            .field("domain", &self.domain)
+            .field("target_port", &self.target_port)
+            .field("bytes_in", &self.bytes_in.load(Ordering::Relaxed))
+            .field("bytes_out", &self.bytes_out.load(Ordering::Relaxed))
+            .finish()
+    }
+}
+
+impl ProxyRoute {
+    pub fn new(domain: String, target_port: u16) -> Self {
+        Self {
+            domain,
+            target_port,
+            bytes_in: Arc::new(AtomicU64::new(0)),
+            bytes_out: Arc::new(AtomicU64::new(0)),
+        }
+    }
 }
 
 pub type RouteTable = Arc<RwLock<Vec<ProxyRoute>>>;
@@ -174,17 +211,17 @@ where
     }
 
     // Find matching route
-    let (target_port, route_table_dump) = {
+    let (route_match, route_table_dump) = {
         let table = routes.read().unwrap();
-        let port = find_route(&table, host.as_deref());
+        let matched = find_route(&table, host.as_deref());
         let dump: Vec<String> = table.iter()
             .map(|r| format!("{}:{}", r.domain, r.target_port))
             .collect();
-        (port, dump)
+        (matched, dump)
     };
 
-    let target_port = match target_port {
-        Some(p) => p,
+    let (target_port, counter_in, counter_out) = match route_match {
+        Some((p, ci, co)) => (p, ci, co),
         None => {
             let body = format!(
                 "run.dev proxy: no route for '{}'\nknown routes: {}",
@@ -240,40 +277,75 @@ where
 
     let is_websocket = is_upgrade_request(request);
 
+    // Count the initial request bytes
+    counter_in.fetch_add(filled as u64, Ordering::Relaxed);
+
     if is_websocket {
         // ── WebSocket path ──────────────────────────────────────────────────
-        // Preserve the Connection: Upgrade header — only add X-Forwarded-*.
-        // Then do a plain bidirectional copy (the WebSocket connection is
-        // long-lived and both sides send frames freely).
         let request = inject_websocket_headers(request, is_tls, host.as_deref());
         upstream.write_all(&request).await?;
 
         let (mut client_read, mut client_write) = tokio::io::split(client);
         let (mut upstream_read, mut upstream_write) = upstream.split();
 
+        let ci = counter_in.clone();
+        let co = counter_out.clone();
         let _ = tokio::try_join!(
-            tokio::io::copy(&mut client_read, &mut upstream_write),
-            tokio::io::copy(&mut upstream_read, &mut client_write),
+            async {
+                let mut buf = vec![0u8; 65536];
+                loop {
+                    match client_read.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            ci.fetch_add(n as u64, Ordering::Relaxed);
+                            if upstream_write.write_all(&buf[..n]).await.is_err() { break; }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Ok::<_, std::io::Error>(())
+            },
+            async {
+                let mut buf = vec![0u8; 65536];
+                loop {
+                    match upstream_read.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            co.fetch_add(n as u64, Ordering::Relaxed);
+                            if client_write.write_all(&buf[..n]).await.is_err() { break; }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Ok::<_, std::io::Error>(())
+            },
         );
     } else {
         // ── Normal HTTP path ────────────────────────────────────────────────
-        // Inject Connection: close in the request AND response so the browser
-        // opens a fresh connection per request (each gets header injection).
         let request = inject_proxy_headers(request, is_tls, host.as_deref());
         upstream.write_all(&request).await?;
 
-        // Bidirectional copy — simple and reliable. When either side closes,
-        // the copy finishes. The browser will close its end after receiving
-        // the full response because it sees Connection: close in the response
-        // (injected below via the response rewrite).
-        //
-        // We read the response headers from upstream, inject Connection: close,
-        // then forward everything else as a raw pipe.
         let (mut client_read, mut client_write) = tokio::io::split(client);
         let (mut upstream_read, mut upstream_write) = upstream.split();
 
+        let ci = counter_in.clone();
+        let co = counter_out.clone();
+
         // Task: forward remaining request body (for POST/PUT with bodies > 64KB)
-        let fwd = async { tokio::io::copy(&mut client_read, &mut upstream_write).await };
+        let fwd = async {
+            let mut buf = vec![0u8; 65536];
+            loop {
+                match client_read.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        ci.fetch_add(n as u64, Ordering::Relaxed);
+                        if upstream_write.write_all(&buf[..n]).await.is_err() { break; }
+                    }
+                    Err(_) => break,
+                }
+            }
+            Ok::<_, std::io::Error>(0u64)
+        };
 
         // Task: read response headers, inject Connection: close, pipe the rest
         let resp = async {
@@ -293,7 +365,6 @@ where
                 }
             }
             if filled > 0 {
-                // Log the response status line
                 let resp_line = std::str::from_utf8(&buf[..filled.min(80)])
                     .ok()
                     .and_then(|t| t.lines().next())
@@ -301,26 +372,26 @@ where
                 proxy_log(&format!("← {} ({} bytes) for {}{}", resp_line, filled, host.as_deref().unwrap_or("?"), req_path));
 
                 let modified = inject_response_connection_close(&buf[..filled]);
+                co.fetch_add(modified.len() as u64, Ordering::Relaxed);
                 let _ = client_write.write_all(&modified).await;
                 let _ = client_write.flush().await;
-                // Pipe remaining response body. Use a read loop with a short
-                // idle timeout so we don't hang forever when the upstream ignores
-                // Connection: close (common with Node.js dev servers).
+
                 let mut pipe_buf = vec![0u8; 65536];
                 loop {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         upstream_read.read(&mut pipe_buf),
                     ).await {
-                        Ok(Ok(0)) => break,            // upstream closed
+                        Ok(Ok(0)) => break,
                         Ok(Ok(n)) => {
+                            co.fetch_add(n as u64, Ordering::Relaxed);
                             if client_write.write_all(&pipe_buf[..n]).await.is_err() {
-                                break; // client gone
+                                break;
                             }
                             let _ = client_write.flush().await;
                         }
-                        Ok(Err(_)) => break,           // read error
-                        Err(_) => break,               // idle timeout — response is done
+                        Ok(Err(_)) => break,
+                        Err(_) => break,
                     }
                 }
             }
@@ -568,15 +639,14 @@ fn extract_host_header(request: &[u8]) -> Option<String> {
     None
 }
 
-fn find_route(routes: &[ProxyRoute], host: Option<&str>) -> Option<u16> {
+/// Find a matching route and return (port, bytes_in counter, bytes_out counter).
+fn find_route(routes: &[ProxyRoute], host: Option<&str>) -> Option<(u16, Arc<AtomicU64>, Arc<AtomicU64>)> {
     let host = host?;
-    // Exact match first
     for route in routes {
         if route.domain.eq_ignore_ascii_case(host) {
-            return Some(route.target_port);
+            return Some((route.target_port, route.bytes_in.clone(), route.bytes_out.clone()));
         }
     }
-    // Wildcard: if host ends with .local and no exact match, try base domain
     None
 }
 
@@ -739,6 +809,13 @@ pub fn new_route_table() -> RouteTable {
 
 pub async fn update_routes(table: &RouteTable, new_routes: Vec<ProxyRoute>) {
     let mut t = table.write().unwrap();
+    // Preserve byte counters for domains that already exist
+    for new in &new_routes {
+        if let Some(existing) = t.iter().find(|r| r.domain == new.domain) {
+            new.bytes_in.store(existing.bytes_in.load(Ordering::Relaxed), Ordering::Relaxed);
+            new.bytes_out.store(existing.bytes_out.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
     *t = new_routes;
 }
 
@@ -747,7 +824,12 @@ mod tests {
     use super::*;
 
     fn route(domain: &str, port: u16) -> ProxyRoute {
-        ProxyRoute { domain: domain.to_string(), target_port: port }
+        ProxyRoute::new(domain.to_string(), port)
+    }
+
+    /// Helper: extract just the port from find_route for easier assertions.
+    fn find_port(routes: &[ProxyRoute], host: Option<&str>) -> Option<u16> {
+        find_route(routes, host).map(|(p, _, _)| p)
     }
 
     // ── extract_host_header ──────────────────────────────────────────────────
@@ -781,31 +863,31 @@ mod tests {
     #[test]
     fn find_route_exact_match() {
         let routes = vec![route("api.myapp.local", 3001), route("myapp.local", 3000)];
-        assert_eq!(find_route(&routes, Some("api.myapp.local")), Some(3001));
+        assert_eq!(find_port(&routes, Some("api.myapp.local")), Some(3001));
     }
 
     #[test]
     fn find_route_first_match_wins() {
         let routes = vec![route("app.local", 4000), route("app.local", 9999)];
-        assert_eq!(find_route(&routes, Some("app.local")), Some(4000));
+        assert_eq!(find_port(&routes, Some("app.local")), Some(4000));
     }
 
     #[test]
     fn find_route_no_match_returns_none() {
         let routes = vec![route("other.local", 3000)];
-        assert_eq!(find_route(&routes, Some("app.local")), None);
+        assert_eq!(find_port(&routes, Some("app.local")), None);
     }
 
     #[test]
     fn find_route_none_host_returns_none() {
         let routes = vec![route("app.local", 3000)];
-        assert_eq!(find_route(&routes, None), None);
+        assert_eq!(find_port(&routes, None), None);
     }
 
     #[test]
     fn find_route_case_insensitive() {
         let routes = vec![route("MyApp.local", 5000)];
-        assert_eq!(find_route(&routes, Some("myapp.local")), Some(5000));
+        assert_eq!(find_port(&routes, Some("myapp.local")), Some(5000));
     }
 
     // ── update_routes ────────────────────────────────────────────────────────
