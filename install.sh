@@ -156,44 +156,67 @@ install_rundev_binary() {
     install_rust
 
     BUILD_DIR=""
+    CLEANUP_BUILD=0
     if [[ -f "Cargo.toml" ]]; then
         BUILD_DIR="$(pwd)"
     else
         # Clone the repo to a temp directory
-        BUILD_DIR="$(mktemp -d)"
-        info "Downloading source..."
+        CLONE_PARENT="$(mktemp -d)"
+        BUILD_DIR="$CLONE_PARENT/run.dev"
+        CLEANUP_BUILD=1
+
         if command -v git &>/dev/null; then
-            git clone --depth 1 https://github.com/danieltamas/run.dev.git "$BUILD_DIR" &>/dev/null &
-            spinner $! "Cloning repository"
-            wait $! 2>/dev/null || fail "git clone failed"
-        else
-            # No git? Download tarball instead
-            curl -fsSL "https://github.com/danieltamas/run.dev/archive/refs/heads/main.tar.gz" -o "$BUILD_DIR/source.tar.gz" &
+            git clone --depth 1 https://github.com/danieltamas/run.dev.git "$BUILD_DIR" 2>&1 &
             spinner $! "Downloading source"
-            wait $! 2>/dev/null || fail "Source download failed"
-            tar -xzf "$BUILD_DIR/source.tar.gz" -C "$BUILD_DIR" --strip-components=1
-            rm -f "$BUILD_DIR/source.tar.gz"
+            wait $!
+            if [[ $? -ne 0 ]] || [[ ! -f "$BUILD_DIR/Cargo.toml" ]]; then
+                fail "git clone failed — check your network connection"
+            fi
+            ok "Source downloaded"
+        else
+            TARBALL="$CLONE_PARENT/source.tar.gz"
+            curl -fsSL "https://github.com/danieltamas/run.dev/archive/refs/heads/main.tar.gz" -o "$TARBALL" 2>&1 &
+            spinner $! "Downloading source"
+            wait $!
+            if [[ $? -ne 0 ]] || [[ ! -f "$TARBALL" ]]; then
+                fail "Source download failed — check your network connection"
+            fi
+            mkdir -p "$BUILD_DIR"
+            tar -xzf "$TARBALL" -C "$BUILD_DIR" --strip-components=1
+            rm -f "$TARBALL"
+            if [[ ! -f "$BUILD_DIR/Cargo.toml" ]]; then
+                fail "Source download corrupt — Cargo.toml not found"
+            fi
+            ok "Source downloaded"
         fi
     fi
 
-    LOG="$(mktemp)"
-    (cd "$BUILD_DIR" && cargo build --release) >"$LOG" 2>&1 &
+    BUILD_LOG="$(mktemp)"
+    (cd "$BUILD_DIR" && cargo build --release) >"$BUILD_LOG" 2>&1 &
     BUILD_PID=$!
-    spinner $BUILD_PID "Building run.dev — this takes ~30s on first run"
+    spinner $BUILD_PID "Building run.dev — this takes ~60s on first run"
     wait $BUILD_PID
     STATUS=$?
-    rm -f "$LOG"
 
     if [[ $STATUS -ne 0 ]]; then
-        fail "Build failed. Run 'cargo build --release' in the repo to see errors."
+        echo ""
+        echo -e "  ${RED}Build output:${NC}"
+        tail -20 "$BUILD_LOG" | sed 's/^/    /'
+        rm -f "$BUILD_LOG"
+        fail "Build failed"
+    fi
+    rm -f "$BUILD_LOG"
+
+    if [[ ! -f "$BUILD_DIR/target/release/rundev" ]]; then
+        fail "Build succeeded but binary not found at $BUILD_DIR/target/release/rundev"
     fi
 
     sudo cp "$BUILD_DIR/target/release/rundev" "$INSTALL_DIR/rundev"
     sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
 
     # Clean up temp clone if we created one
-    if [[ "$BUILD_DIR" != "$(pwd)" ]]; then
-        rm -rf "$BUILD_DIR"
+    if [[ $CLEANUP_BUILD -eq 1 ]]; then
+        rm -rf "$CLONE_PARENT"
     fi
 
     ok "run.dev built and installed"
