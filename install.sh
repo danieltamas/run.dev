@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-7"
+INSTALLER_VERSION="2026.03.17-8"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -452,7 +452,7 @@ echo ""
 echo -e "  ${DIM}All changes can be reversed with: ${BOLD}rundev uninstall${NC}"
 echo ""
 
-# If running interactively, ask for consent
+# If running interactively, ask for consent; if piped, proceed (user chose to pipe it)
 if [[ -t 0 ]]; then
     printf "  ${CYAN}Proceed with installation? [Y/n]${NC} "
     read -r REPLY
@@ -463,17 +463,6 @@ if [[ -t 0 ]]; then
             exit 0
             ;;
     esac
-else
-    # Piped from curl — check for RUNDEV_ACCEPT=1 or show instructions
-    if [[ "${RUNDEV_ACCEPT:-}" != "1" ]]; then
-        echo -e "  ${DIM}To accept these changes, run:${NC}"
-        echo -e "  ${BOLD}curl -fsSL https://getrun.dev/install.sh | RUNDEV_ACCEPT=1 bash${NC}"
-        echo ""
-        echo -e "  ${DIM}Or download and review first:${NC}"
-        echo -e "  ${BOLD}curl -fsSL https://getrun.dev/install.sh -o install.sh && bash install.sh${NC}"
-        echo ""
-        exit 0
-    fi
 fi
 
 echo ""
