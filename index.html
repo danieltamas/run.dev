@@ -90,7 +90,7 @@
       letter-spacing: 3px;
       text-transform: uppercase;
       color: var(--cyan);
-      margin-bottom: 24px;
+      margin-bottom: 14px;
     }
 
     .hero h1 {
@@ -116,6 +116,33 @@
     }
 
     .hero-ascii .dot-col { color: #ffffff; }
+
+    .hero-powered {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      opacity: 1;
+    }
+    .hero-powered svg {
+      width: 16px;
+      height: 16px;
+    }
+    .hero-powered span {
+      font-size: 31px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+    }
+
+    .hero-powered-note {
+      font-size: 18px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      opacity: 0.5;
+      margin-bottom: 24px;
+    }
 
     .hero .tagline {
       font-size: clamp(18px, 3vw, 22px);
@@ -660,15 +687,107 @@
 
     /* ── Responsive ──────────────────────────────────── */
 
+    @media (min-width: 1025px) {
+      .hero-powered svg { width: 48px; height: 48px; }
+      .hero-powered span { font-size: 33px; }
+    }
+
+    @media (max-width: 1024px) {
+      .terminal-header { flex-direction: column; gap: 20px; }
+      .terminal-logo { font-size: 13px; }
+      .terminal-table { font-size: 12px; }
+    }
+
     @media (max-width: 768px) {
-      .feature-grid { grid-template-columns: 1fr; }
-      .ai-features { grid-template-columns: 1fr; }
-      .steps { grid-template-columns: 1fr; }
-      .install-box { flex-wrap: wrap; }
-      .pain-list { flex-direction: column; align-items: center; }
+      .container { padding: 0 20px; }
       section { padding: 80px 0; }
-      .how-it-works, .ai-section, .features { padding: 80px 0; }
-      .how-it-works h2, .ai-section h2, .features h2 { font-size: 32px; }
+
+      /* Hero */
+      .hero { padding: 40px 16px; min-height: auto; }
+      .hero-ascii { font-size: clamp(7px, 2vw, 14px); margin-bottom: 24px; }
+      .hero .tagline { font-size: 17px; margin-bottom: 32px; }
+      .hero-powered-note { font-size: 12px; }
+      .scroll-hint { display: none; }
+
+      /* Install box — keep on one line, shrink font to fit */
+      .install-box {
+        padding: 14px 16px;
+        gap: 8px;
+        max-width: 100%;
+      }
+      .install-box code { font-size: 12px; }
+      .install-box .prompt { font-size: 12px; }
+      .install-box .copy-hint { display: none; }
+
+      /* Pain — keep items in a row, let them wrap naturally */
+      .pain h2 { font-size: 28px; }
+      .pain p { font-size: 17px; }
+      .pain-list { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+      .pain-item { font-size: 13px; padding: 8px 14px; }
+      .pain .nah { font-size: 22px; }
+
+      /* Terminal demo */
+      .terminal { font-size: 11px; }
+      .terminal-header { flex-direction: column; gap: 16px; padding: 16px 16px 12px; }
+      .terminal-logo { font-size: 10px; }
+      .terminal-info { font-size: 12px; }
+      .terminal-table {
+        font-size: 10px;
+        padding: 0 16px 20px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Features */
+      .features, .how-it-works, .ai-section { padding: 80px 0; }
+      .features h2, .how-it-works h2, .ai-section h2 {
+        font-size: 28px;
+        margin-bottom: 40px;
+        letter-spacing: -0.5px;
+      }
+      .feature-grid { grid-template-columns: 1fr; gap: 16px; }
+      .feature-card { padding: 32px 24px; border-radius: 16px; }
+      .feature-card .icon { font-size: 36px; margin-bottom: 16px; }
+      .feature-card h3 { font-size: 20px; margin-bottom: 10px; }
+      .feature-card p { font-size: 16px; }
+      .feature-card code { font-size: 14px; }
+
+      /* Steps */
+      .steps { grid-template-columns: 1fr; gap: 16px; }
+      .step { padding: 28px 24px; gap: 18px; border-radius: 16px; }
+      .step-num { font-size: 40px; min-width: 40px; }
+      .step h3 { font-size: 20px; }
+      .step p { font-size: 15px; }
+
+      /* AI */
+      .ai-features { grid-template-columns: 1fr; gap: 16px; }
+      .ai-section > .container > .ai-desc { font-size: 17px; margin-bottom: 40px; }
+      .ai-feat { padding: 28px 24px; border-radius: 16px; }
+      .ai-feat .ai-feat-icon { font-size: 32px; margin-bottom: 16px; }
+      .ai-feat h3 { font-size: 20px; }
+      .ai-feat p { font-size: 15px; }
+      .ai-note { font-size: 13px; margin-top: 40px; }
+      .ai-logo svg { width: 40px; height: 40px; }
+      .ai-logo span { font-size: 13px; }
+
+      /* CTA */
+      .cta { padding: 80px 16px; }
+      .cta h2 { font-size: 28px; }
+      .cta p { font-size: 17px; margin-bottom: 32px; }
+      .cta-links { gap: 16px; }
+    }
+
+    @media (max-width: 420px) {
+      .hero-ascii { font-size: 6.5px; }
+      .install-box code { font-size: 10.5px; }
+      .install-box { padding: 12px 12px; gap: 6px; }
+      .pain-item { font-size: 12px; padding: 7px 10px; }
+      .terminal-logo { font-size: 8px; }
+      .terminal-table { font-size: 9px; }
+      .container { padding: 0 14px; }
+      .feature-card { padding: 24px 18px; }
+      .step { padding: 24px 18px; }
+      .ai-feat { padding: 24px 18px; }
     }
   </style>
 </head>
@@ -683,6 +802,11 @@
  ██████  ██    ██ ██ ██  ██    ██   ██ █████   ██    ██
  ██   ██ ██    ██ ██  ██ ██<span class="dot-col"> ██ </span>██   ██ ██       ██  ██
  ██   ██  ██████  ██   ████<span class="dot-col"> ██ </span>██████  ███████   ████</pre>
+    <div class="hero-powered">
+      <svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"></path></svg>
+      <span>POWERED BY CLAUDE</span>
+    </div>
+    <p class="hero-powered-note">optional — works great without it too</p>
     <p class="tagline">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
 
     <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
