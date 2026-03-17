@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-4"
+INSTALLER_VERSION="2026.03.17-5"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -197,7 +197,7 @@ install_rundev_binary() {
         chmod +x /tmp/rundev-bin
         sudo mv /tmp/rundev-bin "$INSTALL_DIR/rundev"
         sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
-        ok "run.dev installed"
+        ok "Binary downloaded"
         return
     fi
 
@@ -270,18 +270,12 @@ install_rundev_binary() {
         rm -rf "$CLONE_PARENT"
     fi
 
-    ok "run.dev built and installed"
+    ok "Binary built"
 }
 
 # ── Privileged helper ─────────────────────────────────────────────────────────
 
 install_privileged_helper() {
-    echo ""
-    echo -e "  ${YELLOW}${BOLD}One-time password prompt${NC}"
-    echo -e "  ${DIM}run.dev manages /etc/hosts so your custom domains resolve locally.${NC}"
-    echo -e "  ${DIM}We need to install a tiny helper — enter your password ${BOLD}once${NC}${DIM} and it will never ask again.${NC}"
-    echo ""
-
     CURRENT_USER="$(whoami)"
 
     # This must stay in sync with HELPER_SCRIPT in src/core/hosts.rs
@@ -427,6 +421,17 @@ print_header
 echo -e "  ${DIM}installer v${INSTALLER_VERSION}${NC}"
 echo ""
 detect_os
+
+# Explain what needs sudo BEFORE any password prompt
+echo ""
+echo -e "  ${YELLOW}${BOLD}Administrator access needed${NC}"
+echo -e "  ${DIM}run.dev needs sudo to:${NC}"
+echo -e "  ${DIM}  • Install dependencies (mkcert, build tools)${NC}"
+echo -e "  ${DIM}  • Place the binary in /usr/local/bin${NC}"
+echo -e "  ${DIM}  • Manage /etc/hosts for local domains${NC}"
+echo -e "  ${DIM}  • Set up port forwarding (80/443)${NC}"
+echo ""
+
 install_mkcert
 install_rundev_binary
 install_privileged_helper
