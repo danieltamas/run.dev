@@ -12,6 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
+INSTALLER_VERSION="2026.03.17-1"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -389,6 +390,8 @@ print_done() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 print_header
+echo -e "  ${DIM}installer v${INSTALLER_VERSION}${NC}"
+echo ""
 detect_os
 install_mkcert
 install_rundev_binary
