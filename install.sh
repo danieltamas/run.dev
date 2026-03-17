@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-1"
+INSTALLER_VERSION="2026.03.17-2"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -209,20 +209,25 @@ install_rundev_binary() {
     fi
 
     BUILD_LOG="$(mktemp)"
-    (cd "$BUILD_DIR" && cargo build --release) >"$BUILD_LOG" 2>&1 &
-    BUILD_PID=$!
-    spinner $BUILD_PID "Building run.dev — this takes ~60s on first run"
-    wait $BUILD_PID
-    STATUS=$?
+    CARGO_BIN="${HOME}/.cargo/bin/cargo"
+    if command -v cargo &>/dev/null; then
+        CARGO_BIN="cargo"
+    fi
 
-    if [[ $STATUS -ne 0 ]]; then
+    info "Building run.dev — this takes ~60s on first run..."
+    (cd "$BUILD_DIR" && "$CARGO_BIN" build --release) >"$BUILD_LOG" 2>&1 || true
+    STATUS=${PIPESTATUS[0]:-$?}
+
+    # Check if binary was produced (most reliable success indicator)
+    if [[ ! -f "$BUILD_DIR/target/release/rundev" ]]; then
         echo ""
-        echo -e "  ${RED}Build output:${NC}"
-        tail -20 "$BUILD_LOG" | sed 's/^/    /'
+        echo -e "  ${RED}Build output (last 30 lines):${NC}"
+        tail -30 "$BUILD_LOG" | sed 's/^/    /'
         rm -f "$BUILD_LOG"
-        fail "Build failed"
+        fail "Build failed — binary not produced"
     fi
     rm -f "$BUILD_LOG"
+    ok "Build complete"
 
     if [[ ! -f "$BUILD_DIR/target/release/rundev" ]]; then
         fail "Build succeeded but binary not found at $BUILD_DIR/target/release/rundev"
