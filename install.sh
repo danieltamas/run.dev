@@ -126,12 +126,28 @@ install_rust() {
         return
     fi
     info "Installing Rust via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path &>/dev/null &
+
+    # Download installer first, then run it — avoids pipe-to-background issues
+    RUSTUP_SCRIPT="$(mktemp)"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$RUSTUP_SCRIPT" || fail "Failed to download Rust installer"
+    bash "$RUSTUP_SCRIPT" -y --no-modify-path &>/dev/null &
     spinner $! "Installing Rust"
-    wait $! 2>/dev/null || fail "Rust installation failed"
+    wait $!
+    RUST_STATUS=$?
+    rm -f "$RUSTUP_SCRIPT"
+
+    if [[ $RUST_STATUS -ne 0 ]]; then
+        fail "Rust installation failed"
+    fi
+
     # Source cargo env for the rest of this script
     # shellcheck source=/dev/null
     source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"
+
+    if ! command -v cargo &>/dev/null; then
+        fail "Rust installed but cargo not found in PATH"
+    fi
+
     ok "Rust installed"
 }
 
@@ -166,7 +182,7 @@ install_rundev_binary() {
         CLEANUP_BUILD=1
 
         if command -v git &>/dev/null; then
-            git clone --depth 1 https://github.com/danieltamas/run.dev.git "$BUILD_DIR" 2>&1 &
+            git clone --depth 1 --quiet https://github.com/danieltamas/run.dev.git "$BUILD_DIR" &>/dev/null &
             spinner $! "Downloading source"
             wait $!
             if [[ $? -ne 0 ]] || [[ ! -f "$BUILD_DIR/Cargo.toml" ]]; then
@@ -175,7 +191,7 @@ install_rundev_binary() {
             ok "Source downloaded"
         else
             TARBALL="$CLONE_PARENT/source.tar.gz"
-            curl -fsSL "https://github.com/danieltamas/run.dev/archive/refs/heads/main.tar.gz" -o "$TARBALL" 2>&1 &
+            curl -fsSL "https://github.com/danieltamas/run.dev/archive/refs/heads/main.tar.gz" -o "$TARBALL" &>/dev/null &
             spinner $! "Downloading source"
             wait $!
             if [[ $? -ne 0 ]] || [[ ! -f "$TARBALL" ]]; then
