@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-9"
+INSTALLER_VERSION="2026.03.17-10"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -516,10 +516,10 @@ echo ""
 echo -e "  ${DIM}All changes can be reversed with: ${BOLD}rundev uninstall${NC}"
 echo ""
 
-# If running interactively, ask for consent; if piped, proceed (user chose to pipe it)
-if [[ -t 0 ]]; then
+# Always ask for consent — read from /dev/tty so it works even when piped from curl
+if [[ -e /dev/tty ]]; then
     printf "  ${CYAN}Proceed with installation? [Y/n]${NC} "
-    read -r REPLY
+    read -r REPLY < /dev/tty
     case "$REPLY" in
         [nN]|[nN][oO])
             echo ""
@@ -527,6 +527,11 @@ if [[ -t 0 ]]; then
             exit 0
             ;;
     esac
+else
+    warn "Cannot prompt for confirmation (no terminal). Set RUNDEV_ACCEPT=1 to skip."
+    if [[ "${RUNDEV_ACCEPT:-}" != "1" ]]; then
+        exit 0
+    fi
 fi
 
 echo ""
