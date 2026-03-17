@@ -143,27 +143,50 @@ install_rundev_binary() {
         return
     fi
 
-    # Build from source (dev / local install)
-    if [[ ! -f "Cargo.toml" ]]; then
-        fail "No pre-built binary available and no Cargo.toml found. Clone the repo first."
-    fi
-
+    # Build from source — works whether inside the repo or not
     install_rust
 
+    BUILD_DIR=""
+    if [[ -f "Cargo.toml" ]]; then
+        BUILD_DIR="$(pwd)"
+    else
+        # Clone the repo to a temp directory
+        BUILD_DIR="$(mktemp -d)"
+        info "Downloading source..."
+        if command -v git &>/dev/null; then
+            git clone --depth 1 https://github.com/AltScore/vibe.dev.git "$BUILD_DIR" &>/dev/null &
+            spinner $! "Cloning repository"
+            wait $! 2>/dev/null || fail "git clone failed"
+        else
+            # No git? Download tarball instead
+            curl -fsSL "https://github.com/AltScore/vibe.dev/archive/refs/heads/main.tar.gz" -o "$BUILD_DIR/source.tar.gz" &
+            spinner $! "Downloading source"
+            wait $! 2>/dev/null || fail "Source download failed"
+            tar -xzf "$BUILD_DIR/source.tar.gz" -C "$BUILD_DIR" --strip-components=1
+            rm -f "$BUILD_DIR/source.tar.gz"
+        fi
+    fi
+
     LOG="$(mktemp)"
-    cargo build --release >"$LOG" 2>&1 &
+    (cd "$BUILD_DIR" && cargo build --release) >"$LOG" 2>&1 &
     BUILD_PID=$!
-    spinner $BUILD_PID "Building run.dev — grab a coffee, this takes ~30s on first run"
+    spinner $BUILD_PID "Building run.dev — this takes ~30s on first run"
     wait $BUILD_PID
     STATUS=$?
     rm -f "$LOG"
 
     if [[ $STATUS -ne 0 ]]; then
-        fail "Build failed. Run 'cargo build --release' to see errors."
+        fail "Build failed. Run 'cargo build --release' in the repo to see errors."
     fi
 
-    sudo cp target/release/rundev "$INSTALL_DIR/rundev"
+    sudo cp "$BUILD_DIR/target/release/rundev" "$INSTALL_DIR/rundev"
     sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
+
+    # Clean up temp clone if we created one
+    if [[ "$BUILD_DIR" != "$(pwd)" ]]; then
+        rm -rf "$BUILD_DIR"
+    fi
+
     ok "run.dev built and installed"
 }
 
