@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-5"
+INSTALLER_VERSION="2026.03.17-6"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -422,16 +422,56 @@ echo -e "  ${DIM}installer v${INSTALLER_VERSION}${NC}"
 echo ""
 detect_os
 
-# Explain what needs sudo BEFORE any password prompt
+# ── User consent ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "  ${YELLOW}${BOLD}Administrator access needed${NC}"
-echo -e "  ${DIM}run.dev needs sudo to:${NC}"
-echo -e "  ${DIM}  • Install dependencies (mkcert, build tools)${NC}"
-echo -e "  ${DIM}  • Place the binary in /usr/local/bin${NC}"
-echo -e "  ${DIM}  • Manage /etc/hosts for local domains${NC}"
-echo -e "  ${DIM}  • Set up port forwarding (80/443)${NC}"
+echo -e "  ${YELLOW}${BOLD}This installer will make the following changes:${NC}"
+echo ""
+echo -e "  ${BOLD}Installs${NC}"
+echo -e "  ${DIM}  • rundev binary → /usr/local/bin/rundev${NC}"
+echo -e "  ${DIM}  • mkcert (for trusted local HTTPS certificates)${NC}"
+if [[ "$OS" == "linux" ]]; then
+echo -e "  ${DIM}  • Build tools: gcc, pkg-config, libssl-dev (if building from source)${NC}"
+fi
+echo ""
+echo -e "  ${BOLD}System changes${NC}"
+echo -e "  ${DIM}  • /etc/hosts — adds entries for your local dev domains${NC}"
+echo -e "  ${DIM}  • /etc/sudoers.d/rundev — passwordless sudo for the hosts helper only${NC}"
+if [[ "$OS" == "macos" ]]; then
+echo -e "  ${DIM}  • /etc/pf.anchors/rundev — pfctl firewall rules (port 80→1111, 443→1112)${NC}"
+echo -e "  ${DIM}  • /etc/pf.conf — adds rundev anchor reference${NC}"
+else
+echo -e "  ${DIM}  • iptables — NAT rules for port forwarding (80→1111, 443→1112)${NC}"
+fi
+echo -e "  ${DIM}  • Adds /usr/local/bin to your shell PATH (if not already there)${NC}"
+echo ""
+echo -e "  ${DIM}All changes can be reversed with: ${BOLD}rundev uninstall${NC}"
 echo ""
 
+# If running interactively, ask for consent
+if [[ -t 0 ]]; then
+    printf "  ${CYAN}Proceed with installation? [Y/n]${NC} "
+    read -r REPLY
+    case "$REPLY" in
+        [nN]|[nN][oO])
+            echo ""
+            info "Installation cancelled."
+            exit 0
+            ;;
+    esac
+else
+    # Piped from curl — check for RUNDEV_ACCEPT=1 or show instructions
+    if [[ "${RUNDEV_ACCEPT:-}" != "1" ]]; then
+        echo -e "  ${DIM}To accept these changes, run:${NC}"
+        echo -e "  ${BOLD}curl -fsSL https://getrun.dev/install.sh | RUNDEV_ACCEPT=1 bash${NC}"
+        echo ""
+        echo -e "  ${DIM}Or download and review first:${NC}"
+        echo -e "  ${BOLD}curl -fsSL https://getrun.dev/install.sh -o install.sh && bash install.sh${NC}"
+        echo ""
+        exit 0
+    fi
+fi
+
+echo ""
 install_mkcert
 install_rundev_binary
 install_privileged_helper
