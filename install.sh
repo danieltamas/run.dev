@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-2"
+INSTALLER_VERSION="2026.03.17-3"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -47,7 +47,7 @@ spinner() {
         i=$((i + 1))
         sleep 0.08
     done
-    printf "\r"
+    printf "\r\033[K"
 }
 
 # ── Platform detection ────────────────────────────────────────────────────────
@@ -72,6 +72,34 @@ detect_os() {
 }
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
+
+install_build_deps() {
+    if [[ "$OS" == "linux" ]]; then
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq &>/dev/null
+            sudo apt-get install -y -qq build-essential pkg-config libssl-dev &>/dev/null &
+            spinner $! "Installing build dependencies"
+            wait $! 2>/dev/null || warn "Some build deps may not have installed"
+            ok "Build dependencies"
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y -q gcc make openssl-devel pkg-config &>/dev/null &
+            spinner $! "Installing build dependencies"
+            wait $! 2>/dev/null || warn "Some build deps may not have installed"
+            ok "Build dependencies"
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y -q gcc make openssl-devel pkg-config &>/dev/null &
+            spinner $! "Installing build dependencies"
+            wait $! 2>/dev/null || warn "Some build deps may not have installed"
+            ok "Build dependencies"
+        else
+            warn "Could not install build deps — ensure gcc, pkg-config, and libssl-dev are installed"
+        fi
+    elif [[ "$OS" == "macos" ]]; then
+        if ! xcode-select -p &>/dev/null; then
+            xcode-select --install 2>/dev/null || warn "Install Xcode Command Line Tools manually"
+        fi
+    fi
+}
 
 install_mkcert() {
     if command -v mkcert &>/dev/null; then
@@ -398,6 +426,7 @@ print_header
 echo -e "  ${DIM}installer v${INSTALLER_VERSION}${NC}"
 echo ""
 detect_os
+install_build_deps
 install_mkcert
 install_rundev_binary
 install_privileged_helper
