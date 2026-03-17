@@ -19,12 +19,18 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://getrun.dev">
   <meta property="og:site_name" content="run.dev">
+  <meta property="og:image" content="https://getrun.dev/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:locale" content="en_US">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="run.dev — AI-native local dev environment">
   <meta name="twitter:description" content="One dashboard for all your local services. Single binary. Zero config.">
   <meta name="twitter:creator" content="@danieltamas">
+  <meta name="twitter:image" content="https://getrun.dev/og-image.jpg">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,6 +66,79 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    /* ── Noise overlay ────────────────────────────────── */
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 256px 256px;
+    }
+
+    /* ── Sticky nav ───────────────────────────────────── */
+
+    .site-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      background: rgba(10,10,10,0.6);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.3s, background 0.3s;
+    }
+
+    .site-nav.scrolled {
+      border-bottom-color: var(--border);
+      background: rgba(10,10,10,0.92);
+    }
+
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .nav-logo {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: #ffffff;
+      text-decoration: none;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-logo .dot { color: var(--cyan); }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .nav-links a {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--cyan); }
+
     /* ── Layout ──────────────────────────────────────── */
 
     .container {
@@ -72,6 +151,28 @@
       padding: 140px 0;
     }
 
+    /* ── Gradient heading ─────────────────────────────── */
+
+    .gradient-heading {
+      background: linear-gradient(135deg, var(--cyan) 0%, var(--purple) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Scroll reveal ────────────────────────────────── */
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(32px);
+      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     /* ── Hero ────────────────────────────────────────── */
 
     .hero {
@@ -81,8 +182,38 @@
       justify-content: center;
       align-items: center;
       text-align: center;
-      padding: 60px 24px;
+      padding: 100px 24px 60px;
+      position: relative;
+      overflow: hidden;
     }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 1400px;
+      height: 1400px;
+      background: radial-gradient(ellipse, rgba(86,212,221,0.04) 0%, rgba(86,212,221,0.015) 35%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: 10%;
+      left: 65%;
+      transform: translate(-50%, 0);
+      width: 1000px;
+      height: 1000px;
+      background: radial-gradient(ellipse, rgba(167,139,250,0.025) 0%, transparent 55%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .hero > * { position: relative; z-index: 1; }
 
     .hero-label {
       font-family: var(--font-mono);
@@ -164,12 +295,23 @@
       margin-bottom: 16px;
       white-space: nowrap;
       cursor: pointer;
-      transition: border-color 0.2s;
+      position: relative;
+      transition: border-color 0.15s;
     }
 
-    .install-box:hover {
-      border-color: var(--cyan);
+    .install-box::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 9px;
+      box-shadow: 0 0 24px rgba(86,212,221,0.12);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
     }
+
+    .install-box:hover { border-color: rgba(86,212,221,0.5); }
+    .install-box:hover::after { opacity: 1; }
 
     .install-box .prompt {
       color: var(--text-muted);
@@ -208,6 +350,30 @@
 
     .hero-sub a:hover { color: var(--cyan); }
 
+    /* ── Stats bar ────────────────────────────────────── */
+
+    .stats-bar {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-top: 28px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(26,26,26,0.5);
+    }
+
     /* ── Scroll indicator ────────────────────────────── */
 
     .scroll-hint {
@@ -244,7 +410,21 @@
       font-size: 14px;
       line-height: 1.55;
       box-shadow: 0 32px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.04);
+      position: relative;
     }
+
+    .terminal::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 13px;
+      box-shadow: 0 0 0 1px rgba(86,212,221,0.1), 0 0 60px rgba(86,212,221,0.04);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
+    }
+
+    .terminal:hover::after { opacity: 1; }
 
     .terminal-bar {
       background: #161616;
@@ -336,13 +516,13 @@
 
     .pain {
       text-align: center;
+      background: linear-gradient(180deg, var(--bg) 0%, #0d0d0d 50%, var(--bg) 100%);
     }
 
     .pain h2 {
       font-size: 40px;
       font-weight: 700;
       margin-bottom: 20px;
-      color: #ffffff;
       letter-spacing: -0.5px;
     }
 
@@ -371,6 +551,11 @@
       font-size: 16px;
       color: var(--text-muted);
       text-decoration: line-through;
+      transition: border-color 0.2s;
+    }
+
+    .pain-item:hover {
+      border-color: rgba(248,113,113,0.3);
     }
 
     .pain .nah {
@@ -383,6 +568,7 @@
 
     .features {
       padding: 160px 0;
+      background: linear-gradient(180deg, var(--bg) 0%, #0c0c0e 50%, var(--bg) 100%);
     }
 
     .features .container {
@@ -394,7 +580,6 @@
       font-weight: 700;
       margin-bottom: 80px;
       text-align: center;
-      color: #ffffff;
       letter-spacing: -1px;
     }
 
@@ -409,13 +594,23 @@
       border: 1px solid var(--border);
       border-radius: 24px;
       padding: 64px 56px;
-      transition: border-color 0.25s, box-shadow 0.25s;
+      position: relative;
+      transition: border-color 0.15s;
     }
 
-    .feature-card:hover {
-      border-color: #333;
-      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    .feature-card::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 25px;
+      box-shadow: 0 0 24px rgba(86,212,221,0.12), 0 0 60px rgba(86,212,221,0.05);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
     }
+
+    .feature-card:hover { border-color: rgba(86,212,221,0.35); }
+    .feature-card:hover::after { opacity: 1; }
 
     .feature-card .icon {
       font-size: 56px;
@@ -449,6 +644,7 @@
     .how-it-works {
       text-align: center;
       padding: 160px 0;
+      background: linear-gradient(180deg, var(--bg) 0%, #0d0d0d 50%, var(--bg) 100%);
     }
 
     .how-it-works .container {
@@ -459,7 +655,6 @@
       font-size: 56px;
       font-weight: 700;
       margin-bottom: 80px;
-      color: #ffffff;
       letter-spacing: -1px;
     }
 
@@ -479,22 +674,35 @@
       display: flex;
       gap: 28px;
       align-items: flex-start;
-      transition: border-color 0.25s, box-shadow 0.25s;
+      position: relative;
+      transition: border-color 0.15s;
     }
 
-    .step:hover {
-      border-color: #333;
-      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    .step::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 21px;
+      box-shadow: 0 0 24px rgba(86,212,221,0.12), 0 0 60px rgba(86,212,221,0.05);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
     }
+
+    .step:hover { border-color: rgba(86,212,221,0.35); }
+    .step:hover::after { opacity: 1; }
 
     .step-num {
       font-family: var(--font-mono);
       font-size: 64px;
       font-weight: 800;
-      color: var(--cyan);
+      background: linear-gradient(135deg, var(--cyan) 0%, var(--purple) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
       line-height: 1;
       min-width: 56px;
-      opacity: 0.7;
+      opacity: 0.8;
     }
 
     .step h3 {
@@ -524,7 +732,7 @@
     .ai-section {
       text-align: center;
       padding: 160px 0 180px;
-      background: linear-gradient(180deg, var(--bg) 0%, #0e0e0e 50%, var(--bg) 100%);
+      background: linear-gradient(180deg, var(--bg) 0%, #0e0c14 40%, #0c0e12 60%, var(--bg) 100%);
     }
 
     .ai-section .container {
@@ -557,7 +765,6 @@
       font-size: 56px;
       font-weight: 700;
       margin-bottom: 24px;
-      color: #ffffff;
       letter-spacing: -1px;
     }
 
@@ -581,13 +788,23 @@
       border-radius: 20px;
       padding: 52px 40px;
       text-align: left;
-      transition: border-color 0.25s, box-shadow 0.25s;
+      position: relative;
+      transition: border-color 0.15s;
     }
 
-    .ai-feat:hover {
-      border-color: #333;
-      box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+    .ai-feat::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 21px;
+      box-shadow: 0 0 24px rgba(86,212,221,0.12), 0 0 60px rgba(86,212,221,0.05);
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
     }
+
+    .ai-feat:hover { border-color: rgba(86,212,221,0.35); }
+    .ai-feat:hover::after { opacity: 1; }
 
     .ai-feat .ai-feat-icon {
       font-size: 40px;
@@ -628,12 +845,12 @@
     .cta {
       text-align: center;
       padding: 160px 24px;
+      background: linear-gradient(180deg, var(--bg) 0%, #0d0d10 50%, var(--bg) 100%);
     }
 
     .cta h2 {
       font-size: 48px;
       font-weight: 700;
-      color: #ffffff;
       margin-bottom: 16px;
       letter-spacing: -1px;
     }
@@ -646,6 +863,33 @@
 
     .cta .install-box {
       margin: 0 auto 20px;
+      position: relative;
+      border: none;
+    }
+
+    .cta .install-box::before {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 9px;
+      padding: 1px;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+
+    .cta .install-box::after {
+      box-shadow: 0 0 40px rgba(86,212,221,0.15), 0 0 80px rgba(167,139,250,0.08);
+      border-radius: 9px;
+    }
+
+    .cta .install-box:hover::after { opacity: 1; }
+
+    .cta .install-box:hover::before {
+      background: linear-gradient(135deg, var(--cyan), #e0e0e0, var(--purple));
     }
 
     .cta-links {
@@ -702,12 +946,25 @@
       .container { padding: 0 20px; }
       section { padding: 80px 0; }
 
+      /* Nav */
+      .nav-inner { padding: 12px 16px; }
+      .nav-links { gap: 12px; }
+      .nav-links a { font-size: 12px; }
+      .nav-links a:nth-child(2),
+      .nav-links a:nth-child(3) { display: none; }
+
       /* Hero */
-      .hero { padding: 40px 16px; min-height: auto; }
+      .hero { padding: 80px 16px 40px; min-height: auto; }
+      .hero::before { width: 400px; height: 400px; }
+      .hero::after { width: 300px; height: 300px; }
       .hero-ascii { font-size: clamp(7px, 2vw, 14px); margin-bottom: 24px; }
       .hero .tagline { font-size: 17px; margin-bottom: 32px; }
       .hero-powered-note { font-size: 12px; }
       .scroll-hint { display: none; }
+
+      /* Stats */
+      .stats-bar { gap: 10px; }
+      .stat-item { font-size: 11px; padding: 6px 10px; }
 
       /* Install box — keep on one line, shrink font to fit */
       .install-box {
@@ -788,15 +1045,713 @@
       .feature-card { padding: 24px 18px; }
       .step { padding: 24px 18px; }
       .ai-feat { padding: 24px 18px; }
+      .nav-links { gap: 10px; }
+      .nav-links a { font-size: 11px; }
+      .nav-links a:nth-child(4) { display: none; }
+    }
+
+    /* ── FAQ ──────────────────────────────────────────── */
+
+    .faq {
+      padding: 160px 0;
+      background: linear-gradient(180deg, var(--bg) 0%, #0c0d0e 50%, var(--bg) 100%);
+    }
+
+    .faq .container {
+      max-width: 820px;
+    }
+
+    .faq h2 {
+      font-size: 56px;
+      font-weight: 700;
+      margin-bottom: 64px;
+      text-align: center;
+      letter-spacing: -1px;
+    }
+
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .faq-item:first-child {
+      border-top: 1px solid var(--border);
+    }
+
+    .faq-question {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 28px 0;
+      cursor: pointer;
+      text-align: left;
+      font-family: var(--font-sans);
+      font-size: 20px;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.4;
+      transition: color 0.2s;
+    }
+
+    .faq-question:hover {
+      color: var(--cyan);
+    }
+
+    .faq-chevron {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      margin-left: 24px;
+      color: var(--text-muted);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s;
+    }
+
+    .faq-item.open .faq-chevron {
+      transform: rotate(180deg);
+      color: var(--cyan);
+    }
+
+    .faq-answer-wrapper {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .faq-item.open .faq-answer-wrapper {
+      grid-template-rows: 1fr;
+    }
+
+    .faq-answer {
+      overflow: hidden;
+    }
+
+    .faq-answer-inner {
+      padding: 0 0 32px;
+      font-size: 17px;
+      color: var(--text-dim);
+      line-height: 1.8;
+    }
+
+    .faq-answer-inner code {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      color: var(--cyan);
+      background: var(--bg-code);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .faq-answer-inner a {
+      color: var(--cyan);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .faq-answer-inner a:hover {
+      color: #ffffff;
+    }
+
+    @media (max-width: 768px) {
+      .faq { padding: 80px 0; }
+      .faq h2 { font-size: 28px; margin-bottom: 40px; }
+      .faq-question { font-size: 17px; padding: 22px 0; }
+      .faq-answer-inner { font-size: 15px; padding-bottom: 24px; }
+    }
+
+    @media (max-width: 420px) {
+      .faq-question { font-size: 16px; }
+      .faq-answer-inner { font-size: 14px; }
+    }
+
+    /* ══════════════════════════════════════════════════════
+       DEGEN MODE
+       ══════════════════════════════════════════════════════ */
+
+    /* ── Toggle button ───────────────────────────────── */
+
+    .mode-toggle {
+      display: flex;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 0;
+      margin-left: 8px;
+    }
+
+    .mode-btn {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: color 0.2s, background 0.2s;
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .mode-btn:hover { color: var(--text); }
+
+    .mode-btn-active {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+    }
+
+    body.degen .mode-toggle {
+      border-color: rgba(255,45,149,0.3);
+      background: rgba(255,45,149,0.06);
+    }
+
+    body.degen .mode-btn-active {
+      background: rgba(255,45,149,0.2);
+      color: #ff2d95;
+    }
+
+    /* ── Degen palette ───────────────────────────────── */
+
+    body.degen {
+      --dg-pink: #ff2d95;
+      --dg-green: #39ff14;
+      --dg-purple: #bf5fff;
+      --dg-yellow: #ffe600;
+      --dg-cyan: #00ffff;
+      --dg-orange: #ff6b35;
+      --bg: #050505;
+      --bg-card: #0a0a0a;
+      --border: #1a1a1a;
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='24' viewBox='0 0 20 24'%3E%3Ctext y='16' font-size='16'%3E%24%3C/text%3E%3C/svg%3E") 4 12, auto;
+    }
+
+    /* ── Scanline overlay ────────────────────────────── */
+
+    body.degen::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 9998;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+    }
+
+    body.degen::after {
+      opacity: 0.06;
+    }
+
+    /* ── Glitch text ─────────────────────────────────── */
+
+    @keyframes glitch {
+      0%, 100% { text-shadow: -2px 0 #ff2d95, 2px 0 #00ffff; }
+      25% { text-shadow: 2px 0 #ff2d95, -2px 0 #00ffff; }
+      50% { text-shadow: -1px -1px #ff2d95, 1px 1px #00ffff; }
+      75% { text-shadow: 1px -1px #ff2d95, -1px 1px #00ffff; }
+    }
+
+    @keyframes glitch-hard {
+      0%, 90%, 100% { clip-path: inset(0 0 0 0); transform: translate(0); }
+      92% { clip-path: inset(20% 0 40% 0); transform: translate(-4px, 2px); }
+      94% { clip-path: inset(60% 0 10% 0); transform: translate(4px, -2px); }
+      96% { clip-path: inset(30% 0 30% 0); transform: translate(-2px, 0); }
+      98% { clip-path: inset(10% 0 70% 0); transform: translate(3px, 1px); }
+    }
+
+    @keyframes neon-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    @keyframes slam-left {
+      0% { opacity: 0; transform: translateX(-120px) rotate(-3deg); }
+      60% { transform: translateX(8px) rotate(0.5deg); }
+      100% { opacity: 1; transform: translateX(0) rotate(0); }
+    }
+
+    @keyframes slam-right {
+      0% { opacity: 0; transform: translateX(120px) rotate(3deg); }
+      60% { transform: translateX(-8px) rotate(-0.5deg); }
+      100% { opacity: 1; transform: translateX(0) rotate(0); }
+    }
+
+    @keyframes slam-up {
+      0% { opacity: 0; transform: translateY(80px) rotate(2deg); }
+      60% { transform: translateY(-6px) rotate(-0.5deg); }
+      100% { opacity: 1; transform: translateY(0) rotate(0); }
+    }
+
+    @keyframes slam-down {
+      0% { opacity: 0; transform: translateY(-80px) rotate(-2deg); }
+      60% { transform: translateY(6px) rotate(0.5deg); }
+      100% { opacity: 1; transform: translateY(0) rotate(0); }
+    }
+
+    @keyframes spin-once {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes spin-forever {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes type-cursor {
+      0%, 100% { border-right-color: transparent; }
+      50% { border-right-color: var(--dg-green); }
+    }
+
+    @keyframes toast-in {
+      0% { transform: translateX(120%); opacity: 0; }
+      100% { transform: translateX(0); opacity: 1; }
+    }
+
+    @keyframes toast-out {
+      0% { transform: translateX(0); opacity: 1; }
+      100% { transform: translateX(120%); opacity: 0; }
+    }
+
+    @keyframes crash-flicker {
+      0% { opacity: 1; }
+      10% { opacity: 0; }
+      11% { opacity: 1; }
+      30% { opacity: 1; }
+      31% { opacity: 0; }
+      33% { opacity: 1; }
+      50% { opacity: 0.8; }
+      70% { opacity: 1; }
+      71% { opacity: 0; }
+      73% { opacity: 1; }
+      100% { opacity: 1; }
+    }
+
+    @keyframes matrix-fall {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10% { transform: translateX(-4px); }
+      20% { transform: translateX(4px); }
+      30% { transform: translateX(-3px); }
+      40% { transform: translateX(3px); }
+      50% { transform: translateX(-2px); }
+      60% { transform: translateX(2px); }
+      70% { transform: translateX(-1px); }
+      80% { transform: translateX(1px); }
+    }
+
+    /* ── Degen hero ──────────────────────────────────── */
+
+    body.degen .hero::before {
+      background: radial-gradient(ellipse, rgba(255,45,149,0.08) 0%, rgba(57,255,20,0.04) 35%, transparent 65%);
+    }
+
+    body.degen .hero::after {
+      background: radial-gradient(ellipse, rgba(191,95,255,0.06) 0%, transparent 55%);
+    }
+
+    body.degen .hero-label {
+      color: var(--dg-pink);
+      animation: neon-pulse 2s ease-in-out infinite;
+    }
+
+    body.degen .hero-ascii {
+      color: var(--dg-green);
+      animation: glitch 3s ease-in-out infinite;
+      text-shadow: 0 0 10px rgba(57,255,20,0.5);
+    }
+
+    body.degen .hero h1 {
+      animation: glitch-hard 4s ease-in-out infinite;
+    }
+
+    body.degen .gradient-heading {
+      background: linear-gradient(135deg, var(--dg-pink) 0%, var(--dg-yellow) 30%, var(--dg-green) 60%, var(--dg-cyan) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: neon-pulse 2s ease-in-out infinite;
+    }
+
+    body.degen .hero-powered span {
+      color: var(--dg-purple);
+    }
+
+    /* ── Degen nav ───────────────────────────────────── */
+
+    body.degen .site-nav {
+      background: rgba(5,5,5,0.8);
+      border-bottom-color: rgba(255,45,149,0.2);
+    }
+
+    body.degen .site-nav.scrolled {
+      border-bottom-color: rgba(255,45,149,0.4);
+      background: rgba(5,5,5,0.95);
+    }
+
+    body.degen .nav-logo .dot { color: var(--dg-pink); }
+    body.degen .nav-links a:hover { color: var(--dg-pink); }
+
+    /* ── Degen cards ─────────────────────────────────── */
+
+    body.degen .feature-card,
+    body.degen .step,
+    body.degen .ai-feat {
+      border-color: rgba(255,45,149,0.15);
+      background: rgba(10,10,10,0.9);
+    }
+
+    body.degen .feature-card:hover,
+    body.degen .step:hover,
+    body.degen .ai-feat:hover {
+      border-color: rgba(255,45,149,0.5);
+    }
+
+    body.degen .feature-card::after,
+    body.degen .step::after,
+    body.degen .ai-feat::after {
+      box-shadow: 0 0 30px rgba(255,45,149,0.15), 0 0 60px rgba(57,255,20,0.05);
+    }
+
+    body.degen .feature-card h3,
+    body.degen .step h3,
+    body.degen .ai-feat h3 {
+      color: var(--dg-pink);
+    }
+
+    body.degen .feature-card code,
+    body.degen .step code,
+    body.degen .ai-feat code {
+      color: var(--dg-green);
+      background: rgba(57,255,20,0.08);
+    }
+
+    /* Card slam animations in degen mode */
+    body.degen .feature-card.visible:nth-child(odd) { animation: slam-left 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    body.degen .feature-card.visible:nth-child(even) { animation: slam-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    body.degen .step.visible:nth-child(1) { animation: slam-left 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    body.degen .step.visible:nth-child(2) { animation: slam-right 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both; }
+    body.degen .step.visible:nth-child(3) { animation: slam-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+    body.degen .step.visible:nth-child(4) { animation: slam-down 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both; }
+    body.degen .ai-feat.visible:nth-child(1) { animation: slam-left 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    body.degen .ai-feat.visible:nth-child(2) { animation: slam-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both; }
+    body.degen .ai-feat.visible:nth-child(3) { animation: slam-right 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+
+    /* One icon spins forever (the "broken" one) */
+    body.degen .feature-card:nth-child(4) .icon {
+      animation: spin-forever 3s linear infinite;
+    }
+
+    /* Slight random tilts */
+    body.degen .feature-card:nth-child(1) { transform: rotate(-0.5deg); }
+    body.degen .feature-card:nth-child(3) { transform: rotate(0.7deg); }
+    body.degen .feature-card:nth-child(5) { transform: rotate(-0.4deg); }
+    body.degen .step:nth-child(2) { transform: rotate(0.5deg); }
+    body.degen .step:nth-child(3) { transform: rotate(-0.6deg); }
+
+    /* ── Degen install box ───────────────────────────── */
+
+    body.degen .install-box {
+      border-color: rgba(57,255,20,0.3);
+      background: rgba(57,255,20,0.05);
+    }
+
+    body.degen .install-box:hover {
+      border-color: var(--dg-green);
+    }
+
+    body.degen .install-box::after {
+      box-shadow: 0 0 30px rgba(57,255,20,0.2);
+    }
+
+    body.degen .install-box code {
+      color: var(--dg-green);
+      text-shadow: 0 0 8px rgba(57,255,20,0.4);
+    }
+
+    /* ── Degen pain section ──────────────────────────── */
+
+    body.degen .pain-item {
+      border-color: rgba(255,45,149,0.3);
+      color: var(--dg-pink);
+      text-decoration: line-through;
+      text-decoration-color: var(--dg-pink);
+    }
+
+    body.degen .pain-item:hover {
+      border-color: var(--dg-pink);
+      animation: shake 0.5s ease-in-out;
+    }
+
+    body.degen .pain .nah {
+      color: var(--dg-green);
+      font-size: 36px;
+      text-shadow: 0 0 20px rgba(57,255,20,0.5);
+    }
+
+    /* ── Degen terminal ──────────────────────────────── */
+
+    body.degen .terminal {
+      border-color: rgba(57,255,20,0.2);
+      box-shadow: 0 32px 100px rgba(0,0,0,0.7), 0 0 40px rgba(57,255,20,0.08);
+    }
+
+    body.degen .terminal-logo {
+      color: var(--dg-green);
+      text-shadow: 0 0 10px rgba(57,255,20,0.5);
+    }
+
+    body.degen .terminal .t-cyan { color: var(--dg-green); }
+    body.degen .terminal .t-green { color: var(--dg-green); text-shadow: 0 0 6px rgba(57,255,20,0.4); }
+    body.degen .terminal .t-red { color: var(--dg-pink); }
+    body.degen .terminal .t-yellow { color: var(--dg-yellow); }
+
+    /* ── Degen stats ─────────────────────────────────── */
+
+    body.degen .stat-item {
+      border-color: rgba(255,45,149,0.2);
+      background: rgba(255,45,149,0.05);
+    }
+
+    /* ── Degen FAQ ───────────────────────────────────── */
+
+    body.degen .faq-item {
+      border-color: rgba(255,45,149,0.15);
+    }
+
+    body.degen .faq-question:hover {
+      color: var(--dg-pink);
+    }
+
+    body.degen .faq-item.open .faq-chevron {
+      color: var(--dg-pink);
+    }
+
+    body.degen .faq-answer-inner a {
+      color: var(--dg-green);
+    }
+
+    body.degen .faq-answer-inner code {
+      color: var(--dg-green);
+      background: rgba(57,255,20,0.08);
+    }
+
+    /* ── Degen CTA ───────────────────────────────────── */
+
+    body.degen .cta .install-box::before {
+      background: linear-gradient(135deg, var(--dg-pink), var(--dg-yellow), var(--dg-green), var(--dg-cyan));
+    }
+
+    body.degen .cta .install-box:hover::before {
+      background: linear-gradient(135deg, var(--dg-green), var(--dg-pink), var(--dg-yellow), var(--dg-cyan));
+    }
+
+    body.degen .cta-links a:hover {
+      color: var(--dg-pink);
+    }
+
+    /* ── Degen footer ────────────────────────────────── */
+
+    body.degen footer {
+      border-top-color: rgba(255,45,149,0.2);
+    }
+
+    body.degen footer a:hover { color: var(--dg-pink); }
+
+    /* ── Toast notifications ─────────────────────────── */
+
+    .degen-toasts {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      z-index: 9990;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .degen-toast {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 12px 18px;
+      border-radius: 8px;
+      background: rgba(10,10,10,0.95);
+      border: 1px solid rgba(255,45,149,0.3);
+      color: var(--text-dim);
+      max-width: 340px;
+      animation: toast-in 0.4s ease-out, toast-out 0.4s ease-in forwards;
+      backdrop-filter: blur(8px);
+    }
+
+    .degen-toast .toast-icon { margin-right: 8px; }
+    .degen-toast .toast-hl { color: var(--dg-pink); }
+    .degen-toast .toast-green { color: var(--dg-green); }
+
+    /* ── Live terminal ticker ────────────────────────── */
+
+    .degen-ticker {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 9990;
+      background: rgba(5,5,5,0.95);
+      border-top: 1px solid rgba(57,255,20,0.2);
+      padding: 6px 16px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--dg-green);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+
+    .degen-ticker-label {
+      color: var(--dg-pink);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .degen-ticker-line {
+      white-space: nowrap;
+      animation: type-cursor 1s step-end infinite;
+      border-right: 2px solid transparent;
+      overflow: hidden;
+    }
+
+    /* ── Crash overlay ───────────────────────────────── */
+
+    .crash-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: var(--font-mono);
+      color: #ccc;
+      padding: 24px;
+    }
+
+    .crash-text {
+      font-size: 13px;
+      line-height: 1.8;
+      max-width: 700px;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+
+    .crash-text .crash-red { color: #ff4444; }
+    .crash-text .crash-yellow { color: #ffcc00; }
+    .crash-text .crash-green { color: #39ff14; }
+    .crash-text .crash-pink { color: #ff2d95; }
+
+    /* ── Matrix rain background ──────────────────────── */
+
+    .matrix-rain {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: -1;
+      overflow: hidden;
+      opacity: 0.06;
+    }
+
+    .matrix-col {
+      position: absolute;
+      top: -100%;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--dg-green);
+      writing-mode: vertical-rl;
+      animation: matrix-fall linear infinite;
+      white-space: nowrap;
+    }
+
+    /* ── Degen responsive ────────────────────────────── */
+
+    @media (max-width: 768px) {
+      .mode-btn { font-size: 10px; padding: 4px 8px; }
+
+      .degen-toasts {
+        top: auto;
+        bottom: 50px;
+        right: 10px;
+        left: 10px;
+      }
+
+      .degen-toast {
+        font-size: 11px;
+        padding: 10px 14px;
+        max-width: 100%;
+      }
+
+      .degen-ticker {
+        font-size: 10px;
+        padding: 5px 12px;
+      }
+
+      .crash-text { font-size: 11px; }
+
+      body.degen .pain .nah { font-size: 28px; }
+
+      body.degen .feature-card:nth-child(1),
+      body.degen .feature-card:nth-child(3),
+      body.degen .feature-card:nth-child(5),
+      body.degen .step:nth-child(2),
+      body.degen .step:nth-child(3) {
+        transform: none;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .mode-btn { font-size: 9px; padding: 3px 6px; }
+
+      .degen-ticker { display: none; }
     }
   </style>
 </head>
 <body>
 
+  <!-- ── Nav ────────────────────────────────────────── -->
+
+  <nav class="site-nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">run<span class="dot">.</span>dev</a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#ai">AI</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/danieltamas/run.dev">GitHub</a>
+        <div class="mode-toggle" role="tablist">
+          <button class="mode-btn mode-btn-active" onclick="toggleDegen()" role="tab" aria-selected="true" data-mode="normal">normal</button>
+          <button class="mode-btn" onclick="toggleDegen()" role="tab" aria-selected="false" data-mode="degen">unhinged</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
   <!-- ── Hero ──────────────────────────────────────── -->
 
   <section class="hero">
-    <div class="hero-label">AI-native local dev environment</div>
+    <div class="hero-label" data-normal="AI-native local dev environment" data-degen="STOP OPENING 47 TERMINAL TABS">AI-native local dev environment</div>
     <pre class="hero-ascii" aria-label="RUN.DEV"> ██████  ██    ██ ███    ██    ██████  ███████ ██    ██
  ██   ██ ██    ██ ████   ██    ██   ██ ██      ██    ██
  ██████  ██    ██ ██ ██  ██    ██   ██ █████   ██    ██
@@ -804,10 +1759,10 @@
  ██   ██  ██████  ██   ████<span class="dot-col"> ██ </span>██████  ███████   ████</pre>
     <div class="hero-powered">
       <svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"></path></svg>
-      <span>POWERED BY CLAUDE</span>
+      <span data-normal="POWERED BY CLAUDE" data-degen="POWERED BY VIBES & CLAUDE">POWERED BY CLAUDE</span>
     </div>
-    <p class="hero-powered-note">optional — works great without it too</p>
-    <p class="tagline">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
+    <p class="hero-powered-note" data-normal="optional — works great without it too" data-degen="optional — but why would you say no to a free AI intern">optional — works great without it too</p>
+    <p class="tagline" data-normal="One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config." data-degen="One binary to mass manage all your local services. Touch grass while it works. Or don't. We're not your mom.">One dashboard for all your services. Automatic domains, SSL, reverse proxy, and AI crash diagnosis. Single binary. Zero config.</p>
 
     <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
       <span class="prompt">$</span>
@@ -816,6 +1771,13 @@
     </div>
     <p class="hero-sub">macOS &amp; Linux &middot; Rust binary &middot; <a href="https://github.com/danieltamas/run.dev">view source</a></p>
 
+    <div class="stats-bar">
+      <div class="stat-item" data-normal="&#9889; < 30s setup" data-degen="&#9889; faster than your standup">&#9889; &lt; 30s setup</div>
+      <div class="stat-item" data-normal="&#128230; 0 config files" data-degen="&#128230; 0 YAML files (you're welcome)">&#128230; 0 config files</div>
+      <div class="stat-item" data-normal="&#128187; macOS &amp; Linux" data-degen="&#128187; works on your machine&#8482;">&#128187; macOS &amp; Linux</div>
+      <div class="stat-item" data-normal="&#127981; Single binary" data-degen="&#128128; 69,420 terminal tabs eliminated">&#127981; Single binary</div>
+    </div>
+
     <div class="scroll-hint">scroll</div>
   </section>
 
@@ -823,18 +1785,18 @@
 
   <section class="pain">
     <div class="container">
-      <h2>You know the drill</h2>
-      <p>6 terminal tabs. 6 start commands. Forget which port is which. "Address already in use." Every. Single. Morning.</p>
+      <h2 class="gradient-heading" data-normal="You know the drill" data-degen="Your morning routine is a war crime">You know the drill</h2>
+      <p data-normal='6 terminal tabs. 6 start commands. Forget which port is which. "Address already in use." Every. Single. Morning.' data-degen='8 terminal tabs. 3 of them are the wrong project. One is still running from yesterday. Port 3000? Taken. Port 3001? Also taken. By what? Nobody knows. You open Activity Monitor and contemplate your life choices.'>6 terminal tabs. 6 start commands. Forget which port is which. "Address already in use." Every. Single. Morning.</p>
 
       <div class="pain-list">
-        <div class="pain-item">MAMP Pro</div>
-        <div class="pain-item">nginx.conf</div>
-        <div class="pain-item">docker-compose.yml</div>
-        <div class="pain-item">/etc/hosts by hand</div>
-        <div class="pain-item">mkcert + openssl</div>
+        <div class="pain-item reveal">MAMP Pro</div>
+        <div class="pain-item reveal" style="transition-delay:0.05s">nginx.conf</div>
+        <div class="pain-item reveal" style="transition-delay:0.1s">docker-compose.yml</div>
+        <div class="pain-item reveal" style="transition-delay:0.15s">/etc/hosts by hand</div>
+        <div class="pain-item reveal" style="transition-delay:0.2s">mkcert + openssl</div>
       </div>
 
-      <div class="nah">Nah.</div>
+      <div class="nah reveal" data-normal="Nah." data-degen="Absolutely not. Touch grass.">Nah.</div>
     </div>
   </section>
 
@@ -842,7 +1804,7 @@
 
   <section>
     <div class="terminal-wrapper">
-      <div class="terminal">
+      <div class="terminal reveal">
         <div class="terminal-bar">
           <div class="terminal-dot red"></div>
           <div class="terminal-dot yellow"></div>
@@ -869,15 +1831,15 @@ hello@danieltamas.com</span></div>
               <div class="t-author"><span class="t-green">2 projects</span> &nbsp;configured &nbsp;<span class="t-dim">v0.1.0</span></div>
             </div>
           </div>
-          <div class="terminal-table"><span class="t-dim">© 2026 Daniel Tamas — danieltamas.com</span>
+          <div class="terminal-table"><span class="t-dim">&copy; 2026 Daniel Tamas — danieltamas.com</span>
 <hr class="terminal-rule"><span class="t-dim">projects</span>
 <span class="t-dim">        service                            url                          local            mem    cpu</span>
 
-<span class="t-dim">▼</span> <span class="t-white">WAM</span>  <span class="t-dim">2 services</span>  ✨
-<span class="t-dim">│</span> <span class="t-green">●</span> <span class="t-green">win.wam.app</span>                          <span class="t-cyan">https://win.wam.app</span>          <span class="t-dim">localhost:5111</span>    <span class="t-dim">42M   0.0%</span>
-<span class="t-dim">│</span> <span class="t-green">●</span> <span class="t-green">api.wam.app</span>                          <span class="t-cyan">https://api.wam.app</span>          <span class="t-dim">localhost:4000</span>    <span class="t-dim">38M   2.1%</span>
-<span class="t-dim">▼</span> <span class="t-white">side-project</span>  <span class="t-dim">1 service</span>  😌
-<span class="t-dim">│</span> <span class="t-red">✗</span> <span class="t-red">backend</span>        <span class="t-yellow">bro, backend is ded. port 3000 is already taken.</span>
+<span class="t-dim">&#9660;</span> <span class="t-white">WAM</span>  <span class="t-dim">2 services</span>  &#10024;
+<span class="t-dim">│</span> <span class="t-green">&#9679;</span> <span class="t-green">win.wam.app</span>                          <span class="t-cyan">https://win.wam.app</span>          <span class="t-dim">localhost:5111</span>    <span class="t-dim">42M   0.0%</span>
+<span class="t-dim">│</span> <span class="t-green">&#9679;</span> <span class="t-green">api.wam.app</span>                          <span class="t-cyan">https://api.wam.app</span>          <span class="t-dim">localhost:4000</span>    <span class="t-dim">38M   2.1%</span>
+<span class="t-dim">&#9660;</span> <span class="t-white">side-project</span>  <span class="t-dim">1 service</span>  &#128524;
+<span class="t-dim">│</span> <span class="t-red">&#10007;</span> <span class="t-red">backend</span>        <span class="t-yellow">bro, backend is ded. port 3000 is already taken.</span>
 <span class="t-dim">│</span>                  <span class="t-dim">press [f] to let me fix it</span>
 <hr class="terminal-rule"><span class="t-dim">/ ask claude something...</span></div>
         </div>
@@ -887,40 +1849,40 @@ hello@danieltamas.com</span></div>
 
   <!-- ── Features ──────────────────────────────────── -->
 
-  <section class="features">
+  <section class="features" id="features">
     <div class="container">
-      <h2>Everything you need, nothing you don't</h2>
+      <h2 class="gradient-heading" data-normal="Everything you need, nothing you don't" data-degen="Features that go unreasonably hard">Everything you need, nothing you don't</h2>
 
       <div class="feature-grid">
-        <div class="feature-card">
-          <div class="icon">🌐</div>
-          <h3>Automatic local domains</h3>
-          <p>Add a project, get <code>myapp.local</code> with wildcard subdomains. Managed via <code>/etc/hosts</code> — no DNS hacks.</p>
+        <div class="feature-card reveal">
+          <div class="icon">&#127760;</div>
+          <h3 data-normal="Automatic local domains" data-degen="Pretty URLs (no more localhost:8739)">Automatic local domains</h3>
+          <p data-normal="Add a project, get myapp.local with wildcard subdomains. Managed via /etc/hosts — no DNS hacks." data-degen="Stop memorizing port numbers like a caveman. You get real domains. Like a real developer. With real self-esteem.">Add a project, get <code>myapp.local</code> with wildcard subdomains. Managed via <code>/etc/hosts</code> — no DNS hacks.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">🔒</div>
-          <h3>Zero-config SSL</h3>
-          <p>Self-signed certs generated in pure Rust. HTTPS on every local domain, with green padlock. No mkcert, no OpenSSL.</p>
+        <div class="feature-card reveal" style="transition-delay:0.1s">
+          <div class="icon">&#128274;</div>
+          <h3 data-normal="Zero-config SSL" data-degen="Green padlock without the crying">Zero-config SSL</h3>
+          <p data-normal="Self-signed certs generated in pure Rust. HTTPS on every local domain, with green padlock. No mkcert, no OpenSSL." data-degen="Remember the last time you tried to set up local SSL? The 47 Stack Overflow tabs? The expired cert you forgot about? Yeah. We fixed that. You're welcome.">Self-signed certs generated in pure Rust. HTTPS on every local domain, with green padlock. No mkcert, no OpenSSL.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">🔀</div>
-          <h3>Reverse proxy</h3>
-          <p>SNI-based HTTPS routing. <code>api.myapp.local</code> maps to <code>localhost:4000</code>. Hot-updatable, no restarts.</p>
+        <div class="feature-card reveal" style="transition-delay:0.15s">
+          <div class="icon">&#128256;</div>
+          <h3 data-normal="Reverse proxy" data-degen="Reverse proxy (the one that actually works)">Reverse proxy</h3>
+          <p data-normal="SNI-based HTTPS routing. api.myapp.local maps to localhost:4000. Hot-updatable, no restarts." data-degen="Routes your traffic like a bouncer who actually read the guest list. No nginx.conf. No Traefik. No 4-hour debugging sessions at 2am.">SNI-based HTTPS routing. <code>api.myapp.local</code> maps to <code>localhost:4000</code>. Hot-updatable, no restarts.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">📊</div>
-          <h3>Live resource stats</h3>
-          <p>CPU% and memory per service, updated every 2 seconds. Know exactly what's eating your RAM.</p>
+        <div class="feature-card reveal" style="transition-delay:0.25s">
+          <div class="icon">&#128202;</div>
+          <h3 data-normal="Live resource stats" data-degen="RAM snitch (it was node_modules)">Live resource stats</h3>
+          <p data-normal="CPU% and memory per service, updated every 2 seconds. Know exactly what's eating your RAM." data-degen="Finally find out why your laptop fan sounds like a jet engine. Spoiler: it's always node_modules. It's always been node_modules.">CPU% and memory per service, updated every 2 seconds. Know exactly what's eating your RAM.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">🔍</div>
-          <h3>Smart project scanning</h3>
-          <p>Point it at a folder. It finds <code>package.json</code>, <code>Cargo.toml</code>, <code>go.mod</code> — and suggests the right start command.</p>
+        <div class="feature-card reveal" style="transition-delay:0.3s">
+          <div class="icon">&#128269;</div>
+          <h3 data-normal="Smart project scanning" data-degen="It reads your code (respectfully)">Smart project scanning</h3>
+          <p data-normal="Point it at a folder. It finds package.json, Cargo.toml, go.mod — and suggests the right start command." data-degen="Point at folder. It figures out what you built. Even that Go binary Steve wrote before he rage-quit. Yes, Steve. We know.">Point it at a folder. It finds <code>package.json</code>, <code>Cargo.toml</code>, <code>go.mod</code> — and suggests the right start command.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">💀</div>
-          <h3>Personality-driven UX</h3>
-          <p>Mood system reflects health at a glance. Crash messages that actually tell you what happened — with suggested fixes.</p>
+        <div class="feature-card reveal" style="transition-delay:0.4s">
+          <div class="icon">&#128128;</div>
+          <h3 data-normal="Personality-driven UX" data-degen="Your services have feelings now">Personality-driven UX</h3>
+          <p data-normal="Mood system reflects health at a glance. Crash messages that actually tell you what happened — with suggested fixes." data-degen="When everything works: vibing. When stuff crashes: &quot;bro, api is ded.&quot; It has moods. It judges your code. It's more emotionally aware than most developers.">Mood system reflects health at a glance. Crash messages that actually tell you what happened — with suggested fixes.</p>
         </div>
       </div>
     </div>
@@ -928,37 +1890,37 @@ hello@danieltamas.com</span></div>
 
   <!-- ── How it works ──────────────────────────────── -->
 
-  <section class="how-it-works">
+  <section class="how-it-works" id="how-it-works">
     <div class="container">
-      <h2>Up and running in 30 seconds</h2>
+      <h2 class="gradient-heading" data-normal="Up and running in 30 seconds" data-degen="4 steps. We counted.">Up and running in 30 seconds</h2>
 
       <div class="steps">
-        <div class="step">
+        <div class="step reveal">
           <div class="step-num">1</div>
           <div>
-            <h3>Install</h3>
-            <p>One curl command. Downloads the binary, sets up the hosts helper, configures port forwarding. Done.</p>
+            <h3 data-normal="Install" data-degen="Pipe curl to bash (live dangerously)">Install</h3>
+            <p data-normal="One curl command. Downloads the binary, sets up the hosts helper, configures port forwarding. Done." data-degen="Yes, we pipe curl to bash. Yes, the security people are screaming. But we show you everything before it runs. Relax.">One curl command. Downloads the binary, sets up the hosts helper, configures port forwarding. Done.</p>
           </div>
         </div>
-        <div class="step">
+        <div class="step reveal" style="transition-delay:0.1s">
           <div class="step-num">2</div>
           <div>
-            <h3>Add a project</h3>
-            <p>Press <code>[a]</code>, type a name. You get a <code>.local</code> domain with SSL certs generated instantly.</p>
+            <h3 data-normal="Add a project" data-degen="Name your child">Add a project</h3>
+            <p data-normal="Press [a], type a name. You get a .local domain with SSL certs generated instantly." data-degen="Press [a]. Type a name. Any name. &quot;my-startup-that-will-definitely-work-this-time.local&quot;. We don't judge. SSL certs appear instantly.">Press <code>[a]</code>, type a name. You get a <code>.local</code> domain with SSL certs generated instantly.</p>
           </div>
         </div>
-        <div class="step">
+        <div class="step reveal" style="transition-delay:0.2s">
           <div class="step-num">3</div>
           <div>
-            <h3>Point at your code</h3>
-            <p>Press <code>[a]</code> again, enter the folder path. Run.dev scans it, detects the framework, suggests the start command and port.</p>
+            <h3 data-normal="Point at your code" data-degen="Show us where the code lives">Point at your code</h3>
+            <p data-normal="Press [a] again, enter the folder path. Run.dev scans it, detects the framework, suggests the start command and port." data-degen="Give it a folder. It scans everything, finds your package.json or Cargo.toml or whatever Steve left behind, and figures out the start command. Smarter than your last code review.">Press <code>[a]</code> again, enter the folder path. Run.dev scans it, detects the framework, suggests the start command and port.</p>
           </div>
         </div>
-        <div class="step">
+        <div class="step reveal" style="transition-delay:0.3s">
           <div class="step-num">4</div>
           <div>
-            <h3>That's it</h3>
-            <p>Your service is running on a pretty HTTPS URL. Add more services, more projects. They all show up in one dashboard.</p>
+            <h3 data-normal="That's it" data-degen="Go touch grass">That's it</h3>
+            <p data-normal="Your service is running on a pretty HTTPS URL. Add more services, more projects. They all show up in one dashboard." data-degen="Your service is running. On a pretty URL. With SSL. You didn't write a single config file. You didn't Google &quot;nginx reverse proxy tutorial&quot; for the 47th time. You're free. Go outside.">Your service is running on a pretty HTTPS URL. Add more services, more projects. They all show up in one dashboard.</p>
           </div>
         </div>
       </div>
@@ -967,51 +1929,180 @@ hello@danieltamas.com</span></div>
 
   <!-- ── AI section ────────────────────────────────── -->
 
-  <section class="ai-section">
+  <section class="ai-section" id="ai">
     <div class="container">
-      <div class="ai-logo">
-        
+      <div class="ai-logo reveal">
+
 <svg height="1em" style="flex:none;line-height:1" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fill-rule="nonzero"></path></svg>
-        <span>Powered by Claude</span>
+        <span data-normal="Powered by Claude" data-degen="Powered by vibes & Claude">Powered by Claude</span>
       </div>
-      <h2>Claude Code built in</h2>
-      <p>Run.dev integrates with Claude Code, Anthropic's local CLI agent. When things break, Claude reads the logs and tells you why. Everything stays on your machine.</p>
+      <h2 class="gradient-heading" data-normal="Claude Code built in" data-degen="You get an AI intern (it's actually good)">Claude Code built in</h2>
+      <p class="ai-desc" data-normal="Run.dev integrates with Claude Code, Anthropic's local CLI agent. When things break, Claude reads the logs and tells you why. Everything stays on your machine." data-degen="When your code crashes at 3am, instead of reading a 200-line stack trace through blurry eyes, Claude reads it for you and says &quot;bro, you forgot to start the database.&quot; Runs locally. Your code stays on your machine. The AI doesn't snitch.">Run.dev integrates with Claude Code, Anthropic's local CLI agent. When things break, Claude reads the logs and tells you why. Everything stays on your machine.</p>
 
       <div class="ai-features">
-        <div class="ai-feat">
-          <div class="ai-feat-icon">🔍</div>
-          <h3>Crash diagnosis</h3>
-          <p>A service dies. Claude reads the stderr, understands the error, and explains what went wrong and how to fix it.</p>
+        <div class="ai-feat reveal">
+          <div class="ai-feat-icon">&#128269;</div>
+          <h3 data-normal="Crash diagnosis" data-degen="&quot;bro, your API is ded&quot;">Crash diagnosis</h3>
+          <p data-normal="A service dies. Claude reads the stderr, understands the error, and explains what went wrong and how to fix it." data-degen="Service crashes. Normal tools show you: &quot;exit code 1&quot;. Wow, thanks. run.dev shows you: &quot;bro, api is ded. port 4000 is taken by that ghost process from 3 hours ago.&quot; Press [f] to fix it.">A service dies. Claude reads the stderr, understands the error, and explains what went wrong and how to fix it.</p>
         </div>
-        <div class="ai-feat">
-          <div class="ai-feat-icon">💬</div>
-          <h3>Debug sessions</h3>
-          <p>Press <code>/</code>, ask anything. Claude knows your project structure, routes, and ports. Answers in context.</p>
+        <div class="ai-feat reveal" style="transition-delay:0.1s">
+          <div class="ai-feat-icon">&#128172;</div>
+          <h3 data-normal="Debug sessions" data-degen="Rubber duck but it talks back">Debug sessions</h3>
+          <p data-normal="Press /, ask anything. Claude knows your project structure, routes, and ports. Answers in context." data-degen="Press / and ask &quot;why is everything on fire?&quot; Claude knows your project structure, your routes, your ports, and probably more about your codebase than you do. It's like pair programming except the other person is competent.">Press <code>/</code>, ask anything. Claude knows your project structure, routes, and ports. Answers in context.</p>
         </div>
-        <div class="ai-feat">
-          <div class="ai-feat-icon">⚡</div>
-          <h3>Auto-fix</h3>
-          <p>Port conflicts, missing modules, dead dependencies. Press <code>[f]</code> and run.dev handles the common stuff.</p>
+        <div class="ai-feat reveal" style="transition-delay:0.2s">
+          <div class="ai-feat-icon">&#9889;</div>
+          <h3 data-normal="Auto-fix" data-degen="Press [f] to pay respects (and fix it)">Auto-fix</h3>
+          <p data-normal="Port conflicts, missing modules, dead dependencies. Press [f] and run.dev handles the common stuff." data-degen="Port taken? [f]. Missing module? [f]. Steve's code broke again? [f]. It's the most useful button since Ctrl+Z. Except this one actually works on production issues.">Port conflicts, missing modules, dead dependencies. Press <code>[f]</code> and run.dev handles the common stuff.</p>
         </div>
       </div>
 
-      <p class="ai-note">Optional — works perfectly without it. Disable with --no-ai.</p>
+      <p class="ai-note reveal" data-normal="Optional — works perfectly without it. Disable with --no-ai." data-degen="Optional. But like... why would you not. It's free. It's local. It doesn't judge your code (out loud).">Optional — works perfectly without it. Disable with --no-ai.</p>
+    </div>
+  </section>
+
+  <!-- ── FAQ ────────────────────────────────────────── -->
+
+  <section class="faq" id="faq">
+    <div class="container">
+      <h2 class="gradient-heading reveal" data-normal="Frequently asked questions" data-degen="Things people ask before they just install it">Frequently asked questions</h2>
+
+      <div class="faq-item reveal">
+        <button class="faq-question" aria-expanded="false">
+          What exactly is run.dev?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">run.dev is a single Rust binary that replaces your entire local dev environment setup. Instead of juggling terminal tabs, nginx configs, docker-compose files, and manual /etc/hosts entries, you get one dashboard that manages all your services, gives them real HTTPS domains, and monitors everything. Think of it as "what if someone built the perfect local dev experience from scratch in 2026." You install it with one command, add your projects, and every service gets a pretty URL with SSL, live resource monitoring, and crash recovery — all from one TUI dashboard.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.03s">
+        <button class="faq-question" aria-expanded="false">
+          How is run.dev different from Docker Compose?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">Docker Compose orchestrates containers. run.dev manages processes directly on your machine — no containers, no virtualization overhead, no Docker daemon eating 4GB of RAM in the background. Your services run natively, exactly like they would if you typed the command yourself. run.dev just handles everything around them: domains, SSL, reverse proxy, process monitoring, and crash recovery. If your workflow is "I run <code>npm run dev</code> and <code>cargo run</code> in a bunch of terminals," run.dev is for you. If you need containerized deployments, Docker is for you. They solve different problems.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.06s">
+        <button class="faq-question" aria-expanded="false">
+          Does run.dev work on Windows?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">Not yet. macOS and Linux only. WSL2 might work but isn't officially tested or supported. Windows native support is on the roadmap, but the /etc/hosts and port forwarding mechanics are fundamentally different on Windows and need their own implementation. If you're on Windows with WSL2, give it a shot and <a href="https://github.com/danieltamas/run.dev/issues">let me know how it goes</a>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.09s">
+        <button class="faq-question" aria-expanded="false">
+          Is run.dev free? Is it open source?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">Yes. The current version is fully open source under the MIT license — the code is on <a href="https://github.com/danieltamas/run.dev">GitHub</a>. No telemetry, no gating. I may introduce a Premium version down the line with advanced features, but the open-source core will always be free.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.12s">
+        <button class="faq-question" aria-expanded="false">
+          What languages and frameworks does run.dev support?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">Anything that runs with a shell command. run.dev has smart detection for Node.js (<code>package.json</code>), Rust (<code>Cargo.toml</code>), Go (<code>go.mod</code>), Python/Django (<code>manage.py</code>), Ruby/Rails (<code>Gemfile</code>), and Docker Compose files. But you can add any service that starts with a command — PHP, Java, Elixir, whatever. If you can type it in a terminal, run.dev can manage it. It also auto-detects ports from command flags, <code>.env</code> files, and framework defaults.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.15s">
+        <button class="faq-question" aria-expanded="false">
+          How does the SSL/HTTPS work locally?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">run.dev generates trusted SSL certificates automatically using mkcert (if available) or its built-in pure-Rust certificate generator (rcgen). When you add a service, it creates a certificate for your domain, configures a reverse proxy with SNI-based routing, and everything just works — green padlock in the browser, no warnings, no manual trust steps. Certificates auto-renew before expiry. The whole thing is zero-config: add a service, get HTTPS. That's it.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.18s">
+        <button class="faq-question" aria-expanded="false">
+          Do I need to install Rust to use run.dev?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">No. The installer downloads a prebuilt binary for your platform. If prebuilt binaries aren't available for your architecture, the installer will automatically install Rust and build from source — you don't need to do anything manually. Once installed, run.dev is a single binary with zero runtime dependencies. No Node, no Python, no Docker, no nothing.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.21s">
+        <button class="faq-question" aria-expanded="false">
+          Why Claude? What does the AI actually do?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">run.dev integrates with <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> — Anthropic's local CLI agent — because it's the only AI that runs entirely on your machine. Your code and logs never leave your system. Here's where it helps: when a service crashes, Claude reads the stderr and explains what actually went wrong instead of just showing you an exit code. Press <code>/</code> in the dashboard and ask anything about your running services — it knows your project structure, routes, and ports. For common errors like port conflicts or missing modules, it suggests a one-key fix. That said, run.dev works flawlessly without any AI. Every feature — the dashboard, domains, SSL, proxy, process management — is fully functional on its own. The AI is a layer on top, not a dependency. No API key needed. Disable anytime with <code>--no-ai</code> or just don't configure it.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.24s">
+        <button class="faq-question" aria-expanded="false">
+          What changes does run.dev make to my system?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">The installer is fully transparent about everything it touches. It installs the binary to <code>/usr/local/bin</code>, adds a small hosts helper script with a sudoers rule (so it can update <code>/etc/hosts</code> without asking for your password every time), and sets up port forwarding rules (pfctl on macOS, iptables on Linux) to route ports 80 and 443 to the local proxy. All changes are scoped to localhost only — it never touches your outbound network traffic. The installer shows you the full list before proceeding and requires your explicit confirmation. If the installation fails partway through, it automatically rolls back everything it changed. All changes can be reversed with <code>rundev uninstall</code>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item reveal" style="transition-delay:0.27s">
+        <button class="faq-question" aria-expanded="false">
+          Do my services stop when I close run.dev?
+          <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer-wrapper">
+          <div class="faq-answer">
+            <div class="faq-answer-inner">No — press <code>q</code> and your services keep running in the background. The proxy stays active, your domains keep working, everything continues as-is. Next time you open run.dev, it reconnects to your running processes automatically via PID persistence. If you actually want to stop everything, press <code>Q</code> (capital Q) which triggers a graceful shutdown of all services, or run <code>rundev down</code> from the command line. This means you can use run.dev as a quick status check without disrupting anything.</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </section>
 
   <!-- ── Final CTA ─────────────────────────────────── -->
 
   <section class="cta">
-    <h2>Stop babysitting config files</h2>
-    <p>One binary. All your services. Real domains with SSL. In 30 seconds.</p>
+    <h2 class="gradient-heading reveal" data-normal="Stop babysitting config files" data-degen="Install it before your coworker does and takes credit">Stop babysitting config files</h2>
+    <p class="reveal" style="transition-delay:0.1s" data-normal="One binary. All your services. Real domains with SSL. In 30 seconds." data-degen="One binary. Zero YAML. Your services running on pretty URLs with SSL. While you were reading this, you could've already installed it.">One binary. All your services. Real domains with SSL. In 30 seconds.</p>
 
-    <div class="install-box" onclick="copyInstall(this)" title="Click to copy">
+    <div class="install-box reveal" style="transition-delay:0.2s" onclick="copyInstall(this)" title="Click to copy">
       <span class="prompt">$</span>
       <code>curl -fsSL https://getrun.dev/install.sh | bash</code>
       <span class="copy-hint">copy</span>
     </div>
 
-    <div class="cta-links">
+    <div class="cta-links reveal" style="transition-delay:0.3s">
       <a href="https://github.com/danieltamas/run.dev">GitHub</a>
       <a href="https://github.com/danieltamas/run.dev/blob/main/src/docs/ARCHITECTURE.md">Docs</a>
       <a href="https://github.com/danieltamas/run.dev/issues">Issues</a>
@@ -1021,10 +2112,21 @@ hello@danieltamas.com</span></div>
   <!-- ── Footer ────────────────────────────────────── -->
 
   <footer>
-    <p>Built by <a href="https://danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/danieltamas/run.dev">Source</a></p>
+    <p data-normal-html='Built by <a href="https://danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/danieltamas/run.dev">Source</a>' data-degen-html='Built at 3am by <a href="https://danieltamas.com">Daniel Tamas</a> &middot; Fueled by coffee and spite &middot; <a href="https://github.com/danieltamas/run.dev">Source</a> &middot; No nginx files were harmed'>Built by <a href="https://danieltamas.com">Daniel Tamas</a> &middot; MIT License &middot; <a href="https://github.com/danieltamas/run.dev">Source</a></p>
   </footer>
 
-  <!-- ── Copy to clipboard ─────────────────────────── -->
+  <!-- ── Degen containers (hidden until degen mode) ──── -->
+
+  <div class="degen-toasts" id="degen-toasts" style="display:none"></div>
+
+  <div class="degen-ticker" id="degen-ticker" style="display:none">
+    <span class="degen-ticker-label">LIVE</span>
+    <span class="degen-ticker-line" id="degen-ticker-line"></span>
+  </div>
+
+  <div class="matrix-rain" id="matrix-rain" style="display:none"></div>
+
+  <!-- ── Scripts ─────────────────────────────────────── -->
 
   <script>
     function copyInstall(el) {
@@ -1038,6 +2140,312 @@ hello@danieltamas.com</span></div>
           hint.style.color = '';
         }, 2000);
       });
+    }
+
+    // Scroll reveal
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      observer.observe(el);
+    });
+
+    // Nav scroll state
+    var nav = document.querySelector('.site-nav');
+    window.addEventListener('scroll', function() {
+      nav.classList.toggle('scrolled', window.scrollY > 50);
+    }, { passive: true });
+
+    // FAQ accordion — one open at a time, fluid height
+    document.querySelectorAll('.faq-question').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var item = btn.parentElement;
+        var isOpen = item.classList.contains('open');
+
+        // Close all
+        document.querySelectorAll('.faq-item.open').forEach(function(openItem) {
+          openItem.classList.remove('open');
+          openItem.querySelector('.faq-question').setAttribute('aria-expanded', 'false');
+        });
+
+        // Open clicked (if it wasn't already open)
+        if (!isOpen) {
+          item.classList.add('open');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+
+    /* ═══════════════════════════════════════════════════
+       DEGEN MODE ENGINE
+       ═══════════════════════════════════════════════════ */
+
+    var degenTimers = [];
+    var degenActive = false;
+    var crashShown = localStorage.getItem('degen-crash-shown') === '1';
+
+    // ── Text swap ──────────────────────────────────────
+
+    function swapText(mode) {
+      document.querySelectorAll('[data-' + mode + ']').forEach(function(el) {
+        el.textContent = el.getAttribute('data-' + mode);
+      });
+      document.querySelectorAll('[data-' + mode + '-html]').forEach(function(el) {
+        el.innerHTML = el.getAttribute('data-' + mode + '-html');
+      });
+    }
+
+    // ── Toast system ───────────────────────────────────
+
+    var toastMessages = [
+      { icon: '🔥', text: '<span class="toast-hl">localhost:3000</span> is already in use <span class="toast-green">(it\'s always 3000)</span>' },
+      { icon: '🐳', text: 'Docker Desktop wants <span class="toast-hl">4.2 GB</span> of your RAM (again)' },
+      { icon: '📦', text: '<span class="toast-hl">node_modules</span> is now larger than your project' },
+      { icon: '💀', text: 'Steve\'s code broke again <span class="toast-green">(Steve left 2 years ago)</span>' },
+      { icon: '🔒', text: 'Your SSL cert expired <span class="toast-hl">3 months ago</span>. Nobody noticed.' },
+      { icon: '⚡', text: '<span class="toast-hl">npm install</span> added 847 packages. 12 vulnerabilities found.' },
+      { icon: '🤡', text: 'Pushed to <span class="toast-hl">main</span> instead of your branch. Again.' },
+      { icon: '🧠', text: '<span class="toast-green">Claude:</span> "bro, you forgot to start the database"' },
+      { icon: '🫠', text: 'Your <span class="toast-hl">.env</span> file is in the git history. Forever.' },
+      { icon: '🏃', text: '<span class="toast-hl">go run .</span> compiled in 0.3s. Your React app is still bundling.' },
+      { icon: '🪦', text: 'RIP that microservice nobody maintains but everyone depends on' },
+      { icon: '📟', text: 'Alert: your staging server has been down for <span class="toast-hl">6 days</span>. Nobody noticed.' },
+      { icon: '🤖', text: '<span class="toast-green">run.dev:</span> "3/4 services vibing 😎"' },
+      { icon: '🍕', text: 'The intern just force-pushed to <span class="toast-hl">production</span>.' },
+      { icon: '☕', text: 'Estimated time to fix: <span class="toast-hl">5 minutes</span>. Actual time: <span class="toast-hl">3 hours</span>.' },
+    ];
+    var toastIndex = 0;
+
+    function showToast() {
+      if (!degenActive) return;
+      var container = document.getElementById('degen-toasts');
+      var msg = toastMessages[toastIndex % toastMessages.length];
+      toastIndex++;
+
+      var toast = document.createElement('div');
+      toast.className = 'degen-toast';
+      toast.innerHTML = '<span class="toast-icon">' + msg.icon + '</span>' + msg.text;
+
+      var duration = 4000 + Math.random() * 2000;
+      toast.style.animationDuration = '0.4s, 0.4s';
+      toast.style.animationDelay = '0s, ' + (duration / 1000) + 's';
+
+      container.appendChild(toast);
+      setTimeout(function() { if (toast.parentNode) toast.remove(); }, duration + 500);
+    }
+
+    // ── Ticker system ──────────────────────────────────
+
+    var tickerLines = [
+      '[INFO]  vibes: nominal',
+      '[WARN]  Steve\'s code detected in /src/legacy',
+      '[INFO]  port 3000 freed. finally.',
+      '[ERROR] your CSS has 47 !important flags',
+      '[INFO]  SSL cert generated in 0.02s',
+      '[WARN]  node_modules/ is 2.1 GB. impressive.',
+      '[INFO]  service "api" restarted. mood: 😎 vibing',
+      '[ERROR] "address already in use" — killing ghost process',
+      '[INFO]  Claude says: "have you tried turning it off and on again"',
+      '[WARN]  detected: docker-compose.yml (872 lines). condolences.',
+      '[INFO]  reverse proxy routing updated. zero downtime.',
+      '[ERROR] service "backend" crashed. mood: 💀 flatlined',
+      '[INFO]  auto-fix applied: killed orphan process on :4000',
+      '[WARN]  your .gitignore is lying to you',
+      '[INFO]  all services healthy. go touch grass.',
+      '[ERROR] "Cannot find module \'./config\'" — it\'s ./Config. capital C.',
+      '[INFO]  mood update: 🤒 got the flu → 😎 vibing',
+    ];
+    var tickerIndex = 0;
+
+    function updateTicker() {
+      if (!degenActive) return;
+      var line = document.getElementById('degen-ticker-line');
+      if (!line) return;
+      var text = tickerLines[tickerIndex % tickerLines.length];
+      tickerIndex++;
+
+      // Type it out character by character
+      line.textContent = '';
+      var i = 0;
+      function typeChar() {
+        if (!degenActive || i >= text.length) return;
+        line.textContent += text[i];
+        i++;
+        setTimeout(typeChar, 20 + Math.random() * 30);
+      }
+      typeChar();
+    }
+
+    // ── Matrix rain ────────────────────────────────────
+
+    function initMatrixRain() {
+      var container = document.getElementById('matrix-rain');
+      container.innerHTML = '';
+      var chars = '01アイウエオカキクケコrun.devnpm{}[]();=></:3000localhost';
+      var cols = Math.floor(window.innerWidth / 20);
+      for (var i = 0; i < cols; i++) {
+        var col = document.createElement('div');
+        col.className = 'matrix-col';
+        col.style.left = (i * 20) + 'px';
+        col.style.animationDuration = (8 + Math.random() * 12) + 's';
+        col.style.animationDelay = (Math.random() * -20) + 's';
+        var text = '';
+        for (var j = 0; j < 30; j++) {
+          text += chars[Math.floor(Math.random() * chars.length)] + '\n';
+        }
+        col.textContent = text;
+        container.appendChild(col);
+      }
+    }
+
+    // ── Crash sequence ─────────────────────────────────
+
+    function playCrashSequence() {
+      if (crashShown) return;
+      crashShown = true;
+      localStorage.setItem('degen-crash-shown', '1');
+
+      // Wait for user to scroll a bit
+      var scrollHandler = function() {
+        if (window.scrollY < 400) return;
+        window.removeEventListener('scroll', scrollHandler);
+
+        setTimeout(function() {
+          if (!degenActive) return;
+
+          var overlay = document.createElement('div');
+          overlay.className = 'crash-overlay';
+          overlay.innerHTML =
+            '<div class="crash-text">' +
+            '<span class="crash-red">FATAL ERROR: Segmentation fault (core dumped)</span>\n\n' +
+            'Kernel panic - not syncing: Attempted to kill init!\n' +
+            'CPU: 0 PID: 1 Comm: init Not tainted 6.9.0-rc7\n' +
+            'Call Trace:\n' +
+            '  dump_stack+0x64/0x88\n' +
+            '  panic+0x101/0x2c0\n' +
+            '  <span class="crash-yellow">do_exit+0xa0e/0xa10</span>\n' +
+            '  ? nginx_conf_parse+0x<span class="crash-red">FFFFFF</span>\n' +
+            '  ? docker_compose_yaml+0x<span class="crash-red">TOO_LONG</span>\n' +
+            '  ? steve_legacy_code+0x<span class="crash-red">YIKES</span>\n' +
+            '  do_group_exit+0x33/0xa0\n\n' +
+            '<span class="crash-yellow">--- localhost:3000 is already in use ---</span>\n' +
+            '<span class="crash-yellow">--- your /etc/hosts has 847 entries ---</span>\n' +
+            '<span class="crash-yellow">--- nginx.conf is 12,000 lines ---</span>\n\n' +
+            '  ...\n\n' +
+            '<span class="crash-pink">run.dev is analyzing the crash...</span>\n' +
+            '</div>';
+          overlay.style.animation = 'crash-flicker 0.6s ease-out';
+          document.body.appendChild(overlay);
+
+          // Phase 2: run.dev fixes it
+          setTimeout(function() {
+            overlay.querySelector('.crash-text').innerHTML +=
+              '\n<span class="crash-green">✓ Found the problem.</span>\n' +
+              '<span class="crash-green">✓ It was Steve\'s code. (It\'s always Steve\'s code.)</span>\n' +
+              '<span class="crash-green">✓ Killed ghost process on :3000</span>\n' +
+              '<span class="crash-green">✓ Restarting services...</span>\n\n' +
+              '<span class="crash-pink" style="font-size:16px">run.dev — because life\'s too short for nginx.conf</span>';
+          }, 2000);
+
+          // Phase 3: fade out
+          setTimeout(function() {
+            overlay.style.transition = 'opacity 0.8s';
+            overlay.style.opacity = '0';
+            setTimeout(function() { overlay.remove(); }, 800);
+          }, 4500);
+        }, 800);
+      };
+
+      window.addEventListener('scroll', scrollHandler, { passive: true });
+    }
+
+    // ── Activate / deactivate ──────────────────────────
+
+    function activateDegen() {
+      degenActive = true;
+      document.body.classList.add('degen');
+      swapText('degen');
+
+      // Show containers
+      document.getElementById('degen-toasts').style.display = '';
+      document.getElementById('degen-ticker').style.display = '';
+      document.getElementById('matrix-rain').style.display = '';
+
+      // Init matrix
+      initMatrixRain();
+
+      // Start toasts
+      showToast();
+      degenTimers.push(setInterval(showToast, 5000 + Math.random() * 3000));
+
+      // Start ticker
+      updateTicker();
+      degenTimers.push(setInterval(updateTicker, 4000));
+
+      // Crash sequence (once per session)
+      playCrashSequence();
+
+      // Re-trigger reveal animations for visible cards (slam effect)
+      document.querySelectorAll('.feature-card.visible, .step.visible, .ai-feat.visible').forEach(function(el) {
+        el.style.animation = 'none';
+        el.offsetHeight; // force reflow
+        el.style.animation = '';
+      });
+    }
+
+    function deactivateDegen() {
+      degenActive = false;
+      document.body.classList.remove('degen');
+      swapText('normal');
+
+      // Hide containers
+      document.getElementById('degen-toasts').style.display = 'none';
+      document.getElementById('degen-toasts').innerHTML = '';
+      document.getElementById('degen-ticker').style.display = 'none';
+      document.getElementById('matrix-rain').style.display = 'none';
+      document.getElementById('matrix-rain').innerHTML = '';
+
+      // Clear all timers
+      degenTimers.forEach(function(t) { clearInterval(t); });
+      degenTimers = [];
+
+      // Remove slam animations
+      document.querySelectorAll('.feature-card, .step, .ai-feat').forEach(function(el) {
+        el.style.animation = '';
+      });
+    }
+
+    function updateToggleUI() {
+      var btns = document.querySelectorAll('.mode-btn');
+      btns.forEach(function(b) {
+        var isActive = (degenActive && b.dataset.mode === 'degen') ||
+                       (!degenActive && b.dataset.mode === 'normal');
+        b.classList.toggle('mode-btn-active', isActive);
+        b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+    }
+
+    function toggleDegen() {
+      if (degenActive) {
+        deactivateDegen();
+        localStorage.setItem('degen-mode', '0');
+      } else {
+        activateDegen();
+        localStorage.setItem('degen-mode', '1');
+      }
+      updateToggleUI();
+    }
+
+    // Restore from localStorage
+    if (localStorage.getItem('degen-mode') === '1') {
+      activateDegen();
+      updateToggleUI();
     }
   </script>
 
