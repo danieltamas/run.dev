@@ -154,12 +154,12 @@ install_rundev_binary() {
         BUILD_DIR="$(mktemp -d)"
         info "Downloading source..."
         if command -v git &>/dev/null; then
-            git clone --depth 1 https://github.com/AltScore/vibe.dev.git "$BUILD_DIR" &>/dev/null &
+            git clone --depth 1 https://github.com/danieltamas/run.dev.git "$BUILD_DIR" &>/dev/null &
             spinner $! "Cloning repository"
             wait $! 2>/dev/null || fail "git clone failed"
         else
             # No git? Download tarball instead
-            curl -fsSL "https://github.com/AltScore/vibe.dev/archive/refs/heads/main.tar.gz" -o "$BUILD_DIR/source.tar.gz" &
+            curl -fsSL "https://github.com/danieltamas/run.dev/archive/refs/heads/main.tar.gz" -o "$BUILD_DIR/source.tar.gz" &
             spinner $! "Downloading source"
             wait $! 2>/dev/null || fail "Source download failed"
             tar -xzf "$BUILD_DIR/source.tar.gz" -C "$BUILD_DIR" --strip-components=1
