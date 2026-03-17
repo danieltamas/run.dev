@@ -325,7 +325,7 @@ The HTTPS proxy reads certs from disk **on every TLS handshake** — no restart 
 | `serde_json` | State persistence (state.json) |
 | `clap` | CLI argument parsing and subcommands |
 | `sysinfo` | Per-PID CPU and memory stats |
-| `reqwest` (optional, `ai` feature) | HTTP client for Claude API |
+| `reqwest` (optional, `ai` feature, rustls) | HTTP client for Claude API (uses rustls — no native OpenSSL dependency) |
 | `dirs` | Cross-platform config directory resolution |
 | `chrono` | Timestamps on process starts |
 | `anyhow` | Ergonomic error propagation |
@@ -356,6 +356,17 @@ The `ai` feature (default: on) gates `reqwest` and Claude integration. When disa
 ### 3. Privileged Helper for /etc/hosts
 
 Instead of requiring `sudo` on every hosts update, a small shell script (`/usr/local/bin/rundev-hosts-helper`) is installed once with a NOPASSWD sudoers rule. The app pipes new hosts content to it via stdin. After writing, the helper flushes the DNS cache (macOS: `dscacheutil -flushcache` + `killall -HUP mDNSResponder`, Linux: `resolvectl flush-caches`).
+
+### 3a. Installer Safety
+
+The installer (`install.sh`) is designed to be fully idempotent and safe:
+
+- **Consent screen** — shows all system changes before proceeding (installs, firewall rules, sudoers, hosts)
+- **Interactive prompt** — when run via `bash install.sh`, asks `[Y/n]` confirmation
+- **Automatic rollback** — if the installer fails at any step, an `EXIT` trap rolls back everything already applied: iptables/pfctl rules, sudoers entries, the hosts helper, and the binary
+- **Prebuilt binaries** — downloads from GitHub Releases when available, falls back to building from source (auto-installs Rust + build deps if needed)
+- **Localhost-only iptables** — Linux port forwarding rules use `-d 127.0.0.1` to redirect only loopback traffic, never touching outbound internet
+- **Version tracking** — each installer revision has a version stamp (e.g., `v2026.03.17-9`) displayed at startup for debugging
 
 ### 4. Ring Buffer Logs
 
@@ -450,7 +461,7 @@ Port inference: command flags → `.env PORT=` → `package.json proxy` → fram
 
 ## Project Status
 
-- **Version**: 0.1.0 (early alpha)
+- **Version**: 0.1.1 (early alpha)
 - **Edition**: Rust 2021
 - **Platforms**: macOS (pfctl) and Linux (iptables)
 - **Tests**: Unit tests in config.rs, hosts.rs, resources.rs

@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-8"
+INSTALLER_VERSION="2026.03.17-9"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -36,6 +36,63 @@ ok()   { echo -e "  ${GREEN}✓${NC}  $1"; }
 info() { echo -e "  ${CYAN}→${NC}  $1"; }
 warn() { echo -e "  ${YELLOW}!${NC}  $1"; }
 fail() { echo -e "  ${RED}✗${NC}  $1"; exit 1; }
+
+# ── Rollback tracking ────────────────────────────────────────────────────────
+INSTALL_COMPLETED=0
+INSTALLED_BINARY=0
+INSTALLED_HELPER=0
+INSTALLED_SUDOERS=0
+INSTALLED_IPTABLES=0
+INSTALLED_PFCTL=0
+INSTALLED_PF_CONF=0
+
+rollback() {
+    if [[ $INSTALL_COMPLETED -eq 1 ]]; then
+        return
+    fi
+
+    echo ""
+    echo -e "  ${RED}${BOLD}Installation failed — rolling back changes...${NC}"
+
+    if [[ $INSTALLED_IPTABLES -eq 1 ]]; then
+        sudo iptables -t nat -D OUTPUT -d 127.0.0.1 -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || true
+        sudo iptables -t nat -D OUTPUT -d 127.0.0.1 -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || true
+        ok "Rolled back iptables rules"
+    fi
+
+    if [[ $INSTALLED_PFCTL -eq 1 ]]; then
+        sudo rm -f /etc/pf.anchors/rundev 2>/dev/null || true
+        sudo pfctl -d 2>/dev/null || true
+        ok "Rolled back pfctl rules"
+    fi
+
+    if [[ $INSTALLED_PF_CONF -eq 1 ]]; then
+        sudo sed -i.bak '/# run.dev port forwarding/d;/rdr-anchor "rundev"/d;/anchor "rundev"/d' /etc/pf.conf 2>/dev/null || true
+        sudo rm -f /etc/pf.conf.bak 2>/dev/null || true
+        ok "Rolled back pf.conf changes"
+    fi
+
+    if [[ $INSTALLED_SUDOERS -eq 1 ]]; then
+        sudo rm -f /etc/sudoers.d/rundev 2>/dev/null || true
+        ok "Rolled back sudoers rule"
+    fi
+
+    if [[ $INSTALLED_HELPER -eq 1 ]]; then
+        sudo rm -f "$HELPER_PATH" 2>/dev/null || true
+        ok "Rolled back hosts helper"
+    fi
+
+    if [[ $INSTALLED_BINARY -eq 1 ]]; then
+        sudo rm -f "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev" 2>/dev/null || true
+        ok "Rolled back binary"
+    fi
+
+    echo ""
+    echo -e "  ${DIM}All changes have been reversed. Your system is clean.${NC}"
+    echo ""
+}
+
+trap rollback EXIT
 
 spinner() {
     local pid=$1
@@ -197,6 +254,7 @@ install_rundev_binary() {
         chmod +x /tmp/rundev-bin
         sudo mv /tmp/rundev-bin "$INSTALL_DIR/rundev"
         sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
+        INSTALLED_BINARY=1
         ok "Binary downloaded"
         return
     fi
@@ -270,6 +328,7 @@ install_rundev_binary() {
         rm -rf "$CLONE_PARENT"
     fi
 
+    INSTALLED_BINARY=1
     ok "Binary built"
 }
 
@@ -316,6 +375,8 @@ ${CURRENT_USER} ALL=(ALL) NOPASSWD: ${HELPER_PATH}, /sbin/iptables, /usr/sbin/ip
         chmod 440 /etc/sudoers.d/rundev
     " || fail "Failed to install privileged helper"
 
+    INSTALLED_HELPER=1
+    INSTALLED_SUDOERS=1
     rm -f "$TMP_HELPER" "$TMP_SUDOERS"
 
     # Write sentinel so rundev knows setup has been run
@@ -349,6 +410,8 @@ rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112"
         fi
 
         sudo pfctl -ef "$PF_ANCHOR" &>/dev/null 2>&1 || true
+        INSTALLED_PFCTL=1
+        INSTALLED_PF_CONF=1
         ok "Port forwarding: pfctl rules installed (80→1111, 443→1112)"
     else
         # Linux: iptables redirect
@@ -368,6 +431,7 @@ rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112"
             sudo sh -c 'iptables-save > /etc/iptables/rules.v4' 2>/dev/null || true
         fi
 
+        INSTALLED_IPTABLES=1
         ok "Port forwarding: iptables rules installed (80→1111, 443→1112)"
     fi
 }
@@ -471,4 +535,5 @@ install_rundev_binary
 install_privileged_helper
 setup_port_forwarding
 configure_path
+INSTALL_COMPLETED=1
 print_done

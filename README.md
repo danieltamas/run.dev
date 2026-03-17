@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2021-orange?style=flat-square&logo=rust" alt="Rust 2021" />
-  <img src="https://img.shields.io/badge/version-0.1.0-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.1.1-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/AI-Claude%20powered-blueviolet?style=flat-square" alt="AI Powered" />
@@ -69,20 +69,33 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
 curl -fsSL https://getrun.dev/install.sh | bash
 ```
 
-This will:
-1. Download (or build from source) the `rundev` binary (also installs `run.dev` as an alias)
-2. Install a tiny privileged helper for `/etc/hosts` and `/etc/resolver/` (one-time `sudo`, never again)
-3. Set up port forwarding (80 → 1111, 443 → 1112)
+The installer shows you exactly what it will change before proceeding:
+
+**What gets installed:**
+- `rundev` binary → `/usr/local/bin/rundev` (+ `run.dev` symlink)
+- `mkcert` for trusted local HTTPS certificates
+- Build tools (gcc, pkg-config, libssl-dev) — only if building from source
+
+**What changes on your system:**
+- `/etc/hosts` — adds entries for your local dev domains
+- `/etc/sudoers.d/rundev` — passwordless sudo for the hosts helper only
+- **macOS:** `/etc/pf.anchors/rundev` + `/etc/pf.conf` — pfctl firewall rules (port 80→1111, 443→1112)
+- **Linux:** iptables NAT rules for port forwarding (80→1111, 443→1112, localhost only)
+- Adds `/usr/local/bin` to your shell PATH (if not already there)
+
+All changes can be reversed with `rundev uninstall`. If the installer fails partway through, it automatically rolls back everything it changed.
+
+When run interactively (`bash install.sh`), you'll be prompted to confirm. When piped (`curl | bash`), it proceeds after showing the summary.
 
 **Or build it yourself:**
 
 ```bash
-git clone https://github.com/nicepkg/run.dev.git
+git clone https://github.com/danieltamas/run.dev.git
 cd run.dev
 make install
 ```
 
-**Requirements:** Rust toolchain. That's it. No Node. No Python. No Docker. No external certificate tools.
+**Requirements:** Rust toolchain (the installer handles this automatically). No Node. No Python. No Docker.
 
 ## Quick Start
 
