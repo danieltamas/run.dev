@@ -183,11 +183,15 @@ install_rust() {
 # ── rundev binary ─────────────────────────────────────────────────────────────
 
 install_rundev_binary() {
-    BINARY_URL="https://getrun.dev/releases/${RUNDEV_VERSION}/rundev-${OS}-${ARCH}"
+    if [[ "$RUNDEV_VERSION" == "latest" ]]; then
+        BINARY_URL="https://github.com/danieltamas/run.dev/releases/latest/download/rundev-${OS}-${ARCH}"
+    else
+        BINARY_URL="https://github.com/danieltamas/run.dev/releases/download/${RUNDEV_VERSION}/rundev-${OS}-${ARCH}"
+    fi
 
     # Try pre-built binary first
-    if curl -fsSL --head "$BINARY_URL" &>/dev/null 2>&1; then
-        curl -fsSL "$BINARY_URL" -o /tmp/rundev-bin &
+    if curl -fsSL --head -L "$BINARY_URL" &>/dev/null 2>&1; then
+        curl -fsSL -L "$BINARY_URL" -o /tmp/rundev-bin &
         spinner $! "Downloading run.dev"
         wait $! 2>/dev/null || fail "Download failed"
         chmod +x /tmp/rundev-bin
