@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-3"
+INSTALLER_VERSION="2026.03.17-4"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -198,6 +198,7 @@ install_rundev_binary() {
     fi
 
     # Build from source — works whether inside the repo or not
+    install_build_deps
     install_rust
 
     BUILD_DIR=""
@@ -256,10 +257,6 @@ install_rundev_binary() {
     fi
     rm -f "$BUILD_LOG"
     ok "Build complete"
-
-    if [[ ! -f "$BUILD_DIR/target/release/rundev" ]]; then
-        fail "Build succeeded but binary not found at $BUILD_DIR/target/release/rundev"
-    fi
 
     sudo cp "$BUILD_DIR/target/release/rundev" "$INSTALL_DIR/rundev"
     sudo ln -sf "$INSTALL_DIR/rundev" "$INSTALL_DIR/run.dev"
@@ -426,7 +423,6 @@ print_header
 echo -e "  ${DIM}installer v${INSTALLER_VERSION}${NC}"
 echo ""
 detect_os
-install_build_deps
 install_mkcert
 install_rundev_binary
 install_privileged_helper

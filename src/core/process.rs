@@ -20,9 +20,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt as StdCommandExt;
-
 use crate::core::config::state_path;
 
 const MAX_LOG_LINES: usize = 100;

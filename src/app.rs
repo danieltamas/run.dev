@@ -48,6 +48,7 @@ use crate::core::ssl::ensure_ssl;
 /// - `[e]` from dashboard  → `RenameProject` / `RenameService`
 /// - `[Esc]` always steps back or closes the wizard
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum WizardState {
     Inactive,
 
@@ -403,6 +404,7 @@ pub async fn run_app(
         }
     }
 
+    #[allow(unreachable_code)]
     Ok(())
 }
 
@@ -553,10 +555,9 @@ async fn sync_process_states(state: &mut AppState) {
 
 
 async fn graceful_shutdown(terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>, state: &AppState) {
-    use ratatui::layout::{Constraint, Layout, Alignment};
     use ratatui::style::{Color, Style, Modifier};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Paragraph, Padding};
+    use ratatui::widgets::{Block, Paragraph, Padding};
 
     // Collect service names and their shared handles
     let mut services: Vec<(String, SharedProcess)> = Vec::new();
@@ -572,7 +573,7 @@ async fn graceful_shutdown(terminal: &mut ratatui::Terminal<ratatui::backend::Cr
 
     let total = services.len();
 
-    for (idx, (name, shared)) in services.iter().enumerate() {
+    for (idx, (_name, shared)) in services.iter().enumerate() {
         // Render shutdown progress
         let _ = terminal.draw(|f| {
             let area = f.area();
@@ -645,14 +646,6 @@ async fn graceful_shutdown(terminal: &mut ratatui::Terminal<ratatui::backend::Cr
 
     // Restore terminal
     let _ = crate::tui::restore();
-}
-
-async fn stop_all_services(state: &AppState) {
-    for pv in &state.projects {
-        for s in &pv.shared {
-            let _ = stop_process(s.clone()).await;
-        }
-    }
 }
 
 /// Wrap a command with `nvm use <version>` if a node_version is specified.
@@ -1117,7 +1110,7 @@ async fn complete_add_service(
     command: String,
     port: u16,
     subdomain: String,
-    project_domain: String,
+    _project_domain: String,
 ) {
     // Find and update the project config
     let proj_idx = state
