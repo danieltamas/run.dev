@@ -90,16 +90,25 @@ install_mkcert() {
             fail "Homebrew not found. Install it first: https://brew.sh"
         fi
     else
-        # Linux: try apt, then snap
+        # Linux: try apt, then direct download
+        MKCERT_ARCH="$ARCH"
+        case "$ARCH" in
+            x86_64)  MKCERT_ARCH="amd64" ;;
+            aarch64) MKCERT_ARCH="arm64" ;;
+        esac
+
         if command -v apt-get &>/dev/null; then
             sudo apt-get install -y libnss3-tools &>/dev/null
-            curl -fsSL "https://dl.filippo.io/mkcert/latest?for=linux/${ARCH}" -o /tmp/mkcert &
-            spinner $! "Downloading mkcert"
-            wait $! 2>/dev/null || fail "mkcert download failed"
+        fi
+
+        curl -fsSL "https://dl.filippo.io/mkcert/latest?for=linux/${MKCERT_ARCH}" -o /tmp/mkcert &
+        spinner $! "Downloading mkcert"
+        if wait $! 2>/dev/null; then
             sudo install -m 0755 /tmp/mkcert /usr/local/bin/mkcert
             rm -f /tmp/mkcert
         else
-            warn "Could not install mkcert automatically — install it manually for trusted HTTPS"
+            rm -f /tmp/mkcert
+            warn "Could not install mkcert — HTTPS will use built-in certificates instead"
             return
         fi
     fi
