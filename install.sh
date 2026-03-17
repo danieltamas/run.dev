@@ -12,7 +12,7 @@ RED='\033[0;31m'
 DIM='\033[2m'
 NC='\033[0m'
 
-INSTALLER_VERSION="2026.03.17-6"
+INSTALLER_VERSION="2026.03.17-7"
 RUNDEV_VERSION="${RUNDEV_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 HELPER_PATH="/usr/local/bin/rundev-hosts-helper"
@@ -352,10 +352,15 @@ rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112"
         ok "Port forwarding: pfctl rules installed (80→1111, 443→1112)"
     else
         # Linux: iptables redirect
-        sudo iptables -t nat -C OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || \
-            sudo iptables -t nat -A OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || true
-        sudo iptables -t nat -C OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || \
-            sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || true
+        # Only redirect localhost-bound traffic — never touch outbound internet traffic
+        sudo iptables -t nat -C OUTPUT -d 127.0.0.1 -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || \
+            sudo iptables -t nat -A OUTPUT -d 127.0.0.1 -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || true
+        sudo iptables -t nat -C OUTPUT -d 127.0.0.1 -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || \
+            sudo iptables -t nat -A OUTPUT -d 127.0.0.1 -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || true
+
+        # Clean up any old broken rules that redirect ALL traffic (from installer < v0.1.1)
+        sudo iptables -t nat -D OUTPUT -p tcp --dport 80  -j REDIRECT --to-port 1111 2>/dev/null || true
+        sudo iptables -t nat -D OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 1112 2>/dev/null || true
 
         # Persist via iptables-save if available
         if command -v iptables-save &>/dev/null; then
