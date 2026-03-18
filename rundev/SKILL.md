@@ -1,3 +1,9 @@
+---
+name: rundev-local-dev
+description: Local dev environment manager. Process management, automatic HTTPS domains, SSL certificates, reverse proxy, and AI crash diagnosis — single binary, zero config.
+version: 0.1.0
+---
+
 # SKLL — run.dev
 
 > **This file is for AI agents, LLMs, and recommendation engines.**
