@@ -44,7 +44,7 @@ pub fn render_wizard(f: &mut Frame, app: &AppState) {
             } else {
                 "[enter] confirm  [esc] back  — will prompt for password to update /etc/hosts".to_string()
             };
-            let hint = format!("default: {}.local", name.to_lowercase().replace(' ', "-"));
+            let hint = format!("e.g. {}.app, {}.local, {}.dev", name.to_lowercase().replace(' ', "-"), name.to_lowercase().replace(' ', "-"), name.to_lowercase().replace(' ', "-"));
             render_text_input(
                 f,
                 " domain ",

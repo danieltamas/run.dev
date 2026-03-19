@@ -665,37 +665,39 @@ fn activate_pf() {
     let rules = "rdr pass on lo0 proto tcp from any to any port 80 -> 127.0.0.1 port 1111\n\
                  rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 1112\n";
 
-    // Check current nat rules — only reload if stale or missing
-    let check = std::process::Command::new("sudo")
-        .args(["-n", "pfctl", "-s", "nat"])
-        .output();
-    let needs_update = match &check {
-        Ok(output) => {
-            let current = String::from_utf8_lossy(&output.stdout);
-            !current.contains("port 1111") || !current.contains("port 1112")
-                || current.contains("8080") || current.contains("8443")
-        }
-        Err(_) => true,
-    };
+    // Always flush and reload — pfctl rules can silently go stale after sleep/reboot
+    // and text-based checks on `pfctl -s nat` are unreliable. This is cheap (<10ms).
+    let _ = std::process::Command::new("sudo")
+        .args(["-n", "pfctl", "-F", "nat"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 
-    if needs_update {
-        // Flush stale nat rules first
+    let tmp = std::env::temp_dir().join("rundev-pf-rdr");
+    if std::fs::write(&tmp, rules).is_ok() {
         let _ = std::process::Command::new("sudo")
-            .args(["-n", "pfctl", "-F", "nat"])
+            .args(["-n", "pfctl", "-mf", &tmp.to_string_lossy()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+        let _ = std::fs::remove_file(&tmp);
+    }
 
-        // Merge rdr rules directly into the main ruleset (bypasses anchor ordering issues)
-        let tmp = std::env::temp_dir().join("rundev-pf-rdr");
-        if std::fs::write(&tmp, rules).is_ok() {
-            let _ = std::process::Command::new("sudo")
-                .args(["-n", "pfctl", "-mf", &tmp.to_string_lossy()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            let _ = std::fs::remove_file(&tmp);
-        }
+    // Enable pf if not already active
+    let _ = std::process::Command::new("sudo")
+        .args(["-n", "pfctl", "-e"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    // Verify: try connecting to port 443 → should reach 1112
+    // If it fails, log but don't crash — user can run `rundev setup`
+    let verify = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], 443)),
+        std::time::Duration::from_millis(500),
+    );
+    if verify.is_err() {
+        eprintln!("⚠️  port forwarding may not be active — try `rundev setup`");
     }
 }
 

@@ -786,7 +786,6 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             KeyCode::Backspace => { input.pop(); state.wizard = WizardState::AddProjectName { input }; }
             KeyCode::Enter if !input.trim().is_empty() => {
                 let name = input.trim().to_string();
-                let domain = format!("{}.local", name.to_lowercase().replace(' ', "-"));
 
                 // Reject duplicate project names
                 if state.projects.iter().any(|pv| pv.config.name == name) {
@@ -794,6 +793,29 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     state.wizard = WizardState::AddProjectName { input: name };
                     return Ok(());
                 }
+
+                // Proceed to domain input — pre-fill with sanitised name
+                let default_domain = name.to_lowercase().replace(' ', "-");
+                state.wizard = WizardState::AddProjectDomain {
+                    name,
+                    input: default_domain,
+                };
+            }
+            KeyCode::Char(c) => { input.push(c); state.wizard = WizardState::AddProjectName { input }; }
+            _ => {}
+        },
+
+        WizardState::AddProjectDomain { name, mut input } => match key.code {
+            KeyCode::Esc => {
+                // Go back to project name step
+                state.wizard = WizardState::AddProjectName { input: name };
+            }
+            KeyCode::Backspace => {
+                input.pop();
+                state.wizard = WizardState::AddProjectDomain { name, input };
+            }
+            KeyCode::Enter if !input.trim().is_empty() => {
+                let domain = input.trim().to_string();
 
                 // Create the project
                 let config = ProjectConfig {
@@ -821,7 +843,7 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 tokio::spawn(async move {
                     let msg = match ensure_ssl(&domain_clone) {
                         Ok(_) => format!("🔐 certs ready for {}", domain_clone),
-                        Err(_) => format!("⚠️  cert generation failed for {} — using http", domain_clone),
+                        Err(e) => format!("⚠️  cert generation failed for {}: {}", domain_clone, e),
                     };
                     if let Some(tx) = tx {
                         let _ = tx.send(msg).await;
@@ -830,13 +852,12 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 state.wizard = WizardState::Inactive;
                 state.run_message = Some(format!("created {} — press [a] to add a service", name));
             }
-            KeyCode::Char(c) => { input.push(c); state.wizard = WizardState::AddProjectName { input }; }
+            KeyCode::Char(c) => {
+                input.push(c);
+                state.wizard = WizardState::AddProjectDomain { name, input };
+            }
             _ => {}
         },
-
-        WizardState::AddProjectDomain { .. } => {
-            state.wizard = WizardState::Inactive;
-        }
 
         WizardState::GeneratingCerts { .. } => {
             state.wizard = WizardState::Inactive;
@@ -953,7 +974,7 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                             .iter()
                             .find(|p| p.config.name == project)
                             .map(|p| p.config.domain.clone())
-                            .unwrap_or_else(|| format!("{}.local", project));
+                            .unwrap_or_else(|| project.to_lowercase().replace(' ', "-"));
                         state.wizard = WizardState::AddServiceSubdomain {
                             project,
                             path,
@@ -985,7 +1006,7 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     .iter()
                     .find(|p| p.config.name == project)
                     .map(|p| p.config.domain.clone())
-                    .unwrap_or_else(|| format!("{}.local", project));
+                    .unwrap_or_else(|| project.to_lowercase().replace(' ', "-"));
                 state.wizard = WizardState::AddServiceSubdomain {
                     project, path, name: name.clone(), command,
                     input: name,
@@ -1582,7 +1603,14 @@ async fn start_selected(state: &mut AppState) {
                 Some(pv.config.domain.clone())
             }
         }) {
-            tokio::task::spawn_blocking(move || { let _ = ensure_ssl(&domain); });
+            let tx = state.ai_tx.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = ensure_ssl(&domain) {
+                    if let Some(tx) = tx {
+                        let _ = tx.blocking_send(format!("⚠️  cert failed for {}: {}", domain, e));
+                    }
+                }
+            });
         }
 
         // Spawn the process
@@ -1605,7 +1633,14 @@ async fn start_selected(state: &mut AppState) {
         update_hosts_for_state(state);
         for domain in domains {
             if !domain.is_empty() {
-                tokio::task::spawn_blocking(move || { let _ = ensure_ssl(&domain); });
+                let tx = state.ai_tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    if let Err(e) = ensure_ssl(&domain) {
+                        if let Some(tx) = tx {
+                            let _ = tx.blocking_send(format!("⚠️  cert failed for {}: {}", domain, e));
+                        }
+                    }
+                });
             }
         }
         if let Some(pv) = state.projects.get(proj_idx) {
