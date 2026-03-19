@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.1.0"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.0"), None);
     }
 
     #[test]
