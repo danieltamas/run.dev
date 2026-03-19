@@ -710,10 +710,16 @@ async fn sync_proxy_routes(state: &AppState, route_table: &RouteTable) {
             } else {
                 crate::core::config::resolve_domain(&svc.subdomain, &pv.config.domain)
             };
-            // Prefer the live process port (updated by auto-detection) over the config port
+            // Only route traffic to services that are actually running
             let id = format!("{}/{}", pv.config.name, svc_name);
-            let target_port = pv.processes.iter()
-                .find(|p| p.id == id)
+            let proc = pv.processes.iter().find(|p| p.id == id);
+            let is_active = proc.map(|p| matches!(p.status,
+                crate::core::process::ProcessStatus::Running |
+                crate::core::process::ProcessStatus::Starting |
+                crate::core::process::ProcessStatus::Restarting
+            )).unwrap_or(false);
+            if !is_active { continue; }
+            let target_port = proc
                 .map(|p| p.port)
                 .filter(|&p| p > 0)
                 .unwrap_or(svc.port);
