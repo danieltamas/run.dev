@@ -2,3 +2,7 @@
 .git
 SPEC.md
 target
+release.sh
+rundev-darwin-arm64
+rundev-linux-amd64
+Cross.toml
