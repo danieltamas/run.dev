@@ -234,13 +234,9 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         kill_port(port).await;
     }
 
-    let tokens = shlex::split(&cmd)
-        .ok_or_else(|| anyhow::anyhow!("Invalid command (unmatched quotes) for {}", id))?;
-    let program = tokens
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("Empty command for {}", id))?
-        .clone();
-    let args: Vec<String> = tokens.into_iter().skip(1).collect();
+    if cmd.is_empty() {
+        anyhow::bail!("Empty command for {}", id);
+    }
 
     {
         let mut p = proc.lock().await;
@@ -254,8 +250,13 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
         .or_insert_with(|| "0".to_string());
 
-    let mut child = tokio::process::Command::new(program)
-        .args(&args)
+    // Spawn through a login shell so the user's PATH is available.
+    // Tools installed via version managers (bun, nvm, cargo, go, pyenv, etc.)
+    // add themselves to PATH in shell profile files (~/.zshrc, ~/.bashrc).
+    // Without a login shell, `Command::new("bun")` would fail with "not found".
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let mut child = tokio::process::Command::new(&shell)
+        .args(["-l", "-c", &cmd])
         .current_dir(&working_dir)
         .envs(&full_env)
         .stdin(Stdio::null())
