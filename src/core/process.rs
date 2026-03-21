@@ -251,13 +251,13 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
         .or_insert_with(|| "0".to_string());
 
-    // Collect env vars to inject into .env reads at runtime.
+    // Collect env vars to inject at runtime.
     // Sources (in priority order, later wins):
     //   1. ServiceConfig.env from rundev YAML config
-    //   2. Cloak vault (if project has .cloak marker and `cloak` binary exists)
+    //   2. Cloak vault (if .cloak marker found in working_dir or any parent)
     let mut inject_env = env.clone();
-    if working_dir.join(".cloak").exists() {
-        match cloak_export(&working_dir) {
+    if let Some(cloak_dir) = find_cloak_root(&working_dir) {
+        match cloak_export(&cloak_dir) {
             Ok(cloak_vars) => {
                 inject_env.extend(cloak_vars);
             }
@@ -267,9 +267,15 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         }
     }
 
-    // For Node.js processes with env vars to inject, use a preload script
-    // that merges secrets into .env file reads at runtime. This lets apps using
-    // the dotenv pattern receive secrets without them ever touching disk.
+    // Always inject into process env — this covers Bun, Go, Python, Rust,
+    // and any runtime that respects process env over .env files.
+    if !inject_env.is_empty() {
+        full_env.extend(inject_env.clone());
+    }
+
+    // For Node.js processes, also install a preload script that intercepts
+    // .env file reads. This handles frameworks with built-in dotenv loaders
+    // that override process.env from disk.
     if is_node_command(&cmd) && !inject_env.is_empty() {
         let preload_path = ensure_node_preload();
         if let Ok(env_json) = serde_json::to_string(&inject_env) {
@@ -278,12 +284,6 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
             let new_opts = format!("--require {} {}", preload_path.display(), existing);
             full_env.insert("NODE_OPTIONS".to_string(), new_opts.trim().to_string());
         }
-    }
-
-    // For non-Node processes, inject Cloak/config env vars directly into
-    // the process environment (Go, Python, Rust read from std::env).
-    if !is_node_command(&cmd) && !inject_env.is_empty() {
-        full_env.extend(inject_env);
     }
 
     // Spawn through a login shell with the rc file explicitly sourced.
@@ -573,6 +573,19 @@ pub fn detect_port_in_line(line: &str) -> Option<u16> {
     None
 }
 
+/// Walk up from `start` to find the nearest directory containing a `.cloak` marker.
+fn find_cloak_root(start: &std::path::Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(".cloak").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 /// Call `cloak export` in the given directory and parse the JSON output.
 /// Returns the decrypted env vars as a HashMap.
 /// Requires the `cloak` binary to be in PATH and the user to authenticate.
@@ -773,7 +786,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.2.4"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.5"), None);
     }
 
     #[test]
@@ -830,5 +843,55 @@ mod tests {
         p.push_stdout("Compiling...".to_string());
         assert_eq!(p.port, 0);
         assert_eq!(p.status, ProcessStatus::Starting);
+    }
+
+    // ── find_cloak_root ─────────────────────────────────────────────────────
+
+    #[test]
+    fn find_cloak_root_in_current_dir() {
+        let dir = std::env::temp_dir().join(format!("rundev_cloak_test_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".cloak"), "{}").unwrap();
+
+        assert_eq!(find_cloak_root(&dir), Some(dir.clone()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_cloak_root_in_parent_dir() {
+        let parent = std::env::temp_dir().join(format!("rundev_cloak_parent_{}", timestamp()));
+        let child = parent.join("gateway");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(parent.join(".cloak"), "{}").unwrap();
+
+        assert_eq!(find_cloak_root(&child), Some(parent.clone()));
+        std::fs::remove_dir_all(&parent).ok();
+    }
+
+    #[test]
+    fn find_cloak_root_in_grandparent() {
+        let root = std::env::temp_dir().join(format!("rundev_cloak_gp_{}", timestamp()));
+        let deep = root.join("a").join("b");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(root.join(".cloak"), "{}").unwrap();
+
+        assert_eq!(find_cloak_root(&deep), Some(root.clone()));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn find_cloak_root_returns_none_when_absent() {
+        let dir = std::env::temp_dir().join(format!("rundev_cloak_none_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No .cloak anywhere in temp — will walk up and find nothing
+        // (unless someone has .cloak in /tmp, which is unlikely)
+        assert_eq!(find_cloak_root(&dir), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn timestamp() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos() as u64
     }
 }

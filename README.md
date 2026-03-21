@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2021-orange?style=flat-square&logo=rust" alt="Rust 2021" />
-  <img src="https://img.shields.io/badge/version-0.2.4-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.2.5-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/AI-Claude%20powered-blueviolet?style=flat-square" alt="AI Powered" />
@@ -45,7 +45,7 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝       [/] ask the AI anything
 
   Daniel Tamas
-  hello@danieltamas.com                                       2 projects  configured  v0.2.4
+  hello@danieltamas.com                                       2 projects  configured  v0.2.5
 
   projects ────────────────────────────────────────────────────────────────────────
           service                            url                       local           mem   cpu
