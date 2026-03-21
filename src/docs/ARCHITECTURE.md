@@ -47,6 +47,8 @@ run.dev/
 │   │   ├── config.rs         # YAML config load/save, directory paths
 │   │   ├── scanner.rs        # Project type detection and command inference
 │   │   ├── process.rs        # Process spawn/stop/restart, PID persistence
+│   │   ├── preload.rs        # Node.js preload script management (dotenv secret injection)
+│   │   ├── node_preload.js   # Embedded JS — intercepts .env reads, merges secrets in-memory
 │   │   ├── resources.rs      # CPU/memory monitoring via sysinfo
 │   │   ├── hosts.rs          # /etc/hosts management via privileged helper
 │   │   ├── proxy.rs          # HTTP/HTTPS reverse proxy with SNI routing
@@ -220,6 +222,40 @@ spawn_process()
           │     └── (optional) ask_claude() → AI diagnosis
           └── exit_code == 0 → Stopped
 ```
+
+### Secret Injection (dotenv Preload + Cloak Integration)
+
+Many Node.js apps use the `dotenv` pattern — reading `.env` from disk at startup. This conflicts with keeping secrets off disk (away from AI agents). rundev solves this with a two-layer approach:
+
+```
+spawn_process()
+    │
+    ├── Collect env vars to inject:
+    │     ├── ServiceConfig.env (from ~/.config/rundev/projects/*.yaml)
+    │     └── Cloak vault (if .cloak marker exists + `cloak` binary in PATH)
+    │           └── cloak export → auth (Touch ID / password) → JSON to stdout
+    │
+    ├── Node.js process?
+    │     ├── Write ~/.config/rundev/node-preload.js (embedded at compile time)
+    │     ├── Set __RUNDEV_ENV = JSON of secrets (process env, not disk)
+    │     ├── Set NODE_OPTIONS = --require <preload path>
+    │     └── Preload intercepts fs.readFileSync / readFile / promises.readFile
+    │           └── When target is .env* → merge secrets into content in-memory
+    │                 └── dotenv parses merged content — secrets never on disk
+    │
+    └── Non-Node process? (Go, Python, Rust)
+          └── Inject env vars directly via Command::envs()
+```
+
+**Cloak integration is optional.** If `.cloak` marker exists in the service directory and the `cloak` binary is in PATH, rundev calls `cloak export` (which requires Touch ID or password auth). The decrypted env vars are merged with any vars from the rundev YAML config. If Cloak is not installed, rundev falls back to YAML-only env vars.
+
+**The preload script** (`core/node_preload.js`) monkey-patches `fs.readFileSync`, `fs.readFile`, and `fs.promises.readFile`. When the app (via dotenv or any framework's built-in env loader) reads a `.env*` file, the preload intercepts the result and merges in secrets from `__RUNDEV_ENV`. Existing keys are overridden; new keys are appended. The `__RUNDEV_ENV` var is deleted from `process.env` after the preload reads it.
+
+**Security model:**
+- Secrets stored in `~/.config/rundev/projects/*.yaml` (outside project dir, agents don't see it)
+- Cloak vault encrypted with AES-256-GCM, key in OS keychain (see [getcloak.dev](https://getcloak.dev))
+- `__RUNDEV_ENV` exists only in process memory, never written to disk
+- `.env` file in the project can contain sandbox/placeholder values
 
 ### Wizard Flow (Project + Service Creation)
 
@@ -461,7 +497,7 @@ Port inference: command flags → `.env PORT=` → `package.json proxy` → fram
 
 ## Project Status
 
-- **Version**: 0.2.3 (early alpha)
+- **Version**: 0.2.4 (early alpha)
 - **Edition**: Rust 2021
 - **Platforms**: macOS (pfctl) and Linux (iptables)
 - **Tests**: Unit tests in config.rs, hosts.rs, resources.rs
