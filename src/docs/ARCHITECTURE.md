@@ -461,7 +461,7 @@ Port inference: command flags → `.env PORT=` → `package.json proxy` → fram
 
 ## Project Status
 
-- **Version**: 0.2.2 (early alpha)
+- **Version**: 0.2.3 (early alpha)
 - **Edition**: Rust 2021
 - **Platforms**: macOS (pfctl) and Linux (iptables)
 - **Tests**: Unit tests in config.rs, hosts.rs, resources.rs
