@@ -21,7 +21,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::core::config::state_path;
-use crate::core::preload::{ensure_node_preload, is_node_command};
+use crate::core::preload::{ensure_node_preload, is_direct_node_command};
 
 const MAX_LOG_LINES: usize = 100;
 
@@ -273,15 +273,17 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
         full_env.extend(inject_env.clone());
     }
 
-    // For Node.js processes, also install a preload script that intercepts
-    // .env file reads. This handles frameworks with built-in dotenv loaders
-    // that override process.env from disk.
-    if is_node_command(&cmd) && !inject_env.is_empty() {
+    // For Node.js processes (not Bun), install a preload script that intercepts
+    // .env file reads for frameworks that override process.env from disk.
+    if is_direct_node_command(&cmd) && !inject_env.is_empty() {
         let preload_path = ensure_node_preload();
+        // Write to a space-free path to avoid NODE_OPTIONS parsing issues
+        let safe_path = std::env::temp_dir().join("rundev-node-preload.js");
+        let _ = std::fs::copy(&preload_path, &safe_path);
         if let Ok(env_json) = serde_json::to_string(&inject_env) {
             full_env.insert("__RUNDEV_ENV".to_string(), env_json);
             let existing = full_env.get("NODE_OPTIONS").cloned().unwrap_or_default();
-            let new_opts = format!("--require {} {}", preload_path.display(), existing);
+            let new_opts = format!("--require {} {}", safe_path.display(), existing);
             full_env.insert("NODE_OPTIONS".to_string(), new_opts.trim().to_string());
         }
     }
@@ -595,7 +597,7 @@ fn cloak_export(working_dir: &std::path::Path) -> Result<HashMap<String, String>
         .current_dir(working_dir)
         .stdin(std::process::Stdio::inherit()) // Allow TTY for Touch ID / password
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit()) // Show banner/errors to user
+        .stderr(std::process::Stdio::piped()) // Capture banner to avoid corrupting TUI
         .output()
         .map_err(|e| anyhow::anyhow!("Failed to run `cloak export`: {}", e))?;
 
@@ -786,7 +788,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.2.5"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.6"), None);
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub fn ensure_node_preload() -> PathBuf {
 }
 
 /// Returns `true` when the command looks like it will spawn a Node.js runtime.
+#[cfg(test)]
 pub fn is_node_command(cmd: &str) -> bool {
     let first = cmd.split_whitespace().next().unwrap_or("");
     matches!(
@@ -32,6 +33,15 @@ pub fn is_node_command(cmd: &str) -> bool {
         "node" | "npm" | "npx" | "yarn" | "pnpm" | "bun" | "bunx"
             | "next" | "nuxt" | "vite" | "tsx" | "ts-node"
     )
+}
+
+/// Returns `true` when the command directly invokes the Node.js runtime
+/// (not a package manager). Only these should get NODE_OPTIONS --require
+/// because package managers are Node scripts themselves and may delegate
+/// to non-Node runtimes (e.g. npm → bun).
+pub fn is_direct_node_command(cmd: &str) -> bool {
+    let first = cmd.split_whitespace().next().unwrap_or("");
+    matches!(first, "node" | "next" | "nuxt" | "vite" | "tsx" | "ts-node")
 }
 
 #[cfg(test)]
@@ -57,6 +67,24 @@ mod tests {
         assert!(!is_node_command("python manage.py runserver"));
         assert!(!is_node_command("go run ."));
         assert!(!is_node_command("bundle exec rails server"));
+    }
+
+    #[test]
+    fn detects_direct_node_commands() {
+        assert!(is_direct_node_command("node server.js"));
+        assert!(is_direct_node_command("next dev"));
+        assert!(is_direct_node_command("nuxt dev"));
+        assert!(is_direct_node_command("vite"));
+        assert!(is_direct_node_command("tsx watch src/index.ts"));
+    }
+
+    #[test]
+    fn package_managers_are_not_direct_node() {
+        assert!(!is_direct_node_command("npm run dev"));
+        assert!(!is_direct_node_command("yarn dev"));
+        assert!(!is_direct_node_command("pnpm run start"));
+        assert!(!is_direct_node_command("bun run dev"));
+        assert!(!is_direct_node_command("bunx prisma generate"));
     }
 
     #[test]
