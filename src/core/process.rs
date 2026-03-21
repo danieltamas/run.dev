@@ -250,13 +250,22 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
         .or_insert_with(|| "0".to_string());
 
-    // Spawn through a login shell so the user's PATH is available.
-    // Tools installed via version managers (bun, nvm, cargo, go, pyenv, etc.)
-    // add themselves to PATH in shell profile files (~/.zshrc, ~/.bashrc).
-    // Without a login shell, `Command::new("bun")` would fail with "not found".
+    // Spawn through a login shell with the rc file explicitly sourced.
+    // Login shell (-l) sources ~/.zprofile, but tools like bun, nvm, pyenv
+    // add themselves to ~/.zshrc or ~/.bashrc instead. We source the rc file
+    // explicitly so the full PATH is available without needing -i (which
+    // requires a tty and can cause hangs).
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let rc_source = if shell.ends_with("zsh") {
+        "[ -f ~/.zshrc ] && . ~/.zshrc 2>/dev/null; "
+    } else if shell.ends_with("bash") {
+        "[ -f ~/.bashrc ] && . ~/.bashrc 2>/dev/null; "
+    } else {
+        ""
+    };
+    let wrapped_cmd = format!("{}exec {}", rc_source, cmd);
     let mut child = tokio::process::Command::new(&shell)
-        .args(["-l", "-c", &cmd])
+        .args(["-l", "-c", &wrapped_cmd])
         .current_dir(&working_dir)
         .envs(&full_env)
         .stdin(Stdio::null())
@@ -702,7 +711,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.2.0"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.2"), None);
     }
 
     #[test]
