@@ -21,6 +21,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::core::config::state_path;
+use crate::core::preload::{ensure_node_preload, is_node_command};
 
 const MAX_LOG_LINES: usize = 100;
 
@@ -249,6 +250,41 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     let mut full_env = env.clone();
     full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
         .or_insert_with(|| "0".to_string());
+
+    // Collect env vars to inject into .env reads at runtime.
+    // Sources (in priority order, later wins):
+    //   1. ServiceConfig.env from rundev YAML config
+    //   2. Cloak vault (if project has .cloak marker and `cloak` binary exists)
+    let mut inject_env = env.clone();
+    if working_dir.join(".cloak").exists() {
+        match cloak_export(&working_dir) {
+            Ok(cloak_vars) => {
+                inject_env.extend(cloak_vars);
+            }
+            Err(e) => {
+                eprintln!("[rundev] cloak export failed for {}: {}", id, e);
+            }
+        }
+    }
+
+    // For Node.js processes with env vars to inject, use a preload script
+    // that merges secrets into .env file reads at runtime. This lets apps using
+    // the dotenv pattern receive secrets without them ever touching disk.
+    if is_node_command(&cmd) && !inject_env.is_empty() {
+        let preload_path = ensure_node_preload();
+        if let Ok(env_json) = serde_json::to_string(&inject_env) {
+            full_env.insert("__RUNDEV_ENV".to_string(), env_json);
+            let existing = full_env.get("NODE_OPTIONS").cloned().unwrap_or_default();
+            let new_opts = format!("--require {} {}", preload_path.display(), existing);
+            full_env.insert("NODE_OPTIONS".to_string(), new_opts.trim().to_string());
+        }
+    }
+
+    // For non-Node processes, inject Cloak/config env vars directly into
+    // the process environment (Go, Python, Rust read from std::env).
+    if !is_node_command(&cmd) && !inject_env.is_empty() {
+        full_env.extend(inject_env);
+    }
 
     // Spawn through a login shell with the rc file explicitly sourced.
     // Login shell (-l) sources ~/.zprofile, but tools like bun, nvm, pyenv
@@ -535,6 +571,32 @@ pub fn detect_port_in_line(line: &str) -> Option<u16> {
     }
 
     None
+}
+
+/// Call `cloak export` in the given directory and parse the JSON output.
+/// Returns the decrypted env vars as a HashMap.
+/// Requires the `cloak` binary to be in PATH and the user to authenticate.
+fn cloak_export(working_dir: &std::path::Path) -> Result<HashMap<String, String>> {
+    let output = std::process::Command::new("cloak")
+        .arg("export")
+        .current_dir(working_dir)
+        .stdin(std::process::Stdio::inherit()) // Allow TTY for Touch ID / password
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit()) // Show banner/errors to user
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to run `cloak export`: {}", e))?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "`cloak export` exited with {}",
+            output.status.code().unwrap_or(-1)
+        );
+    }
+
+    let json = String::from_utf8_lossy(&output.stdout);
+    let vars: HashMap<String, String> = serde_json::from_str(&json)
+        .map_err(|e| anyhow::anyhow!("Failed to parse `cloak export` output: {}", e))?;
+    Ok(vars)
 }
 
 #[cfg(test)]
