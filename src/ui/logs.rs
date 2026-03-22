@@ -17,6 +17,32 @@ use ratatui::{
 
 use crate::app::AppState;
 
+/// Strip ANSI escape sequences from a string so raw process output
+/// doesn't interfere with ratatui's own rendering.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Consume the escape sequence
+            if let Some(next) = chars.next() {
+                if next == '[' {
+                    // CSI sequence: eat until we hit a letter (0x40–0x7E)
+                    for c2 in chars.by_ref() {
+                        if c2.is_ascii_alphabetic() || c2 == 'm' {
+                            break;
+                        }
+                    }
+                }
+                // OSC or other sequences — skip the next char and move on
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 pub fn render_logs(f: &mut Frame, area: Rect, state: &AppState) {
     let inner_width = area.width.saturating_sub(2) as usize; // minus left/right borders
     let visible = area.height.saturating_sub(2) as usize; // minus top/bottom borders
@@ -55,19 +81,18 @@ fn get_selected_logs(state: &AppState, visible: usize, max_width: usize) -> Vec<
             if proc.combined_log.is_empty() {
                 return vec!["  waiting for output…".to_string()];
             }
-            // Wrap each log line to the panel width
+            // Strip ANSI codes and wrap each log line to the panel width
             let width = if max_width > 0 { max_width } else { 120 };
             let mut wrapped: Vec<String> = Vec::new();
             for raw in proc.combined_log.iter() {
-                if raw.len() <= width {
-                    wrapped.push(raw.clone());
+                let clean = strip_ansi(raw);
+                let chars: Vec<char> = clean.chars().collect();
+                if chars.len() <= width {
+                    wrapped.push(clean);
                 } else {
-                    // Split at width boundaries
-                    let mut pos = 0;
-                    while pos < raw.len() {
-                        let end = (pos + width).min(raw.len());
-                        wrapped.push(raw[pos..end].to_string());
-                        pos = end;
+                    // Split at char boundaries
+                    for chunk in chars.chunks(width) {
+                        wrapped.push(chunk.iter().collect());
                     }
                 }
             }

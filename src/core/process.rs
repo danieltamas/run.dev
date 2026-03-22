@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use crate::core::config::state_path;
 use crate::core::preload::{ensure_node_preload, is_direct_node_command};
 
-const MAX_LOG_LINES: usize = 100;
+const MAX_LOG_LINES: usize = 1000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProcessStatus {
@@ -695,12 +695,12 @@ mod tests {
     #[test]
     fn push_stderr_ring_buffer_evicts_oldest() {
         let mut p = make_proc("t/t");
-        for i in 0..105 {
+        for i in 0..1005 {
             p.push_stderr(format!("err {}", i));
         }
-        assert_eq!(p.last_stderr.len(), 100);
+        assert_eq!(p.last_stderr.len(), 1000);
         // oldest lines (0-4) should be gone; newest should be present
-        assert_eq!(p.last_stderr.back().unwrap(), "err 104");
+        assert_eq!(p.last_stderr.back().unwrap(), "err 1004");
         assert!(!p.last_stderr.contains(&"err 0".to_string()));
     }
 
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.2.6"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.7"), None);
     }
 
     #[test]

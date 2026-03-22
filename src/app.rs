@@ -157,6 +157,8 @@ pub struct AppState {
     pub ai_tx: Option<mpsc::Sender<String>>,
     pub wizard: WizardState,
     pub shell_out_request: Option<ShellOutRequest>,
+    /// Set to `true` to force a full terminal clear before the next draw.
+    pub needs_clear: bool,
 }
 
 impl AppState {
@@ -181,6 +183,7 @@ impl AppState {
             ai_tx: None,
             wizard: WizardState::Inactive,
             shell_out_request: None,
+            needs_clear: false,
         }
     }
 
@@ -351,11 +354,16 @@ pub async fn run_app(
     let mut resource_tick: u8 = 0;
     let mut hosts_updated = false;
     let mut events = EventStream::new();
+    state.needs_clear = true; // Force full clear on first frame
 
     loop {
         sync_process_states(&mut state).await;
         state.recalculate_mood();
 
+        if state.needs_clear {
+            terminal.clear()?;
+            state.needs_clear = false;
+        }
         terminal.draw(|f| crate::ui::render(f, &mut state))?;
 
         tokio::select! {
@@ -367,6 +375,11 @@ pub async fn run_app(
                 }
 
                 resource_tick = resource_tick.wrapping_add(1);
+                // Force a full repaint every ~30s to recover from any terminal corruption
+                // (e.g. after sleep/wake, screen lock, or terminal emulator glitches).
+                if resource_tick % 255 == 0 {
+                    state.needs_clear = true;
+                }
                 if resource_tick % 20 == 0 {
                     let all_shared: Vec<SharedProcess> = state.projects
                         .iter()
@@ -776,6 +789,11 @@ async fn handle_event(
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 handle_mouse(state, mouse);
             }));
+        }
+        Event::Resize(_, _) => {
+            // Terminal was resized — force a full clear so ratatui repaints
+            // every cell instead of diffing against a stale buffer.
+            state.needs_clear = true;
         }
         _ => {}
     }
