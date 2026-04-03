@@ -32,7 +32,7 @@ use core::config::load_all_projects;
 use core::hosts::{is_helper_current, HELPER_PATH, HELPER_SCRIPT};
 
 #[derive(Parser)]
-#[command(name = "rundev", about = "AI-native local dev environment", version = "0.2.7")]
+#[command(name = "rundev", about = "AI-native local dev environment", version = "0.2.8")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

@@ -253,16 +253,18 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
 
     // Collect env vars to inject at runtime.
     // Sources (in priority order, later wins):
-    //   1. ServiceConfig.env from rundev YAML config
-    //   2. Cloak vault (if .cloak marker found in working_dir or any parent)
-    let mut inject_env = env.clone();
+    //   1. .env files from the service's working directory (always loaded)
+    //   2. ServiceConfig.env from rundev YAML config
+    //   3. Cloak vault secrets override on top (if available)
+    let mut inject_env = load_dotenv(&working_dir);
+    inject_env.extend(env.clone());
     if let Some(cloak_dir) = find_cloak_root(&working_dir) {
         match cloak_export(&cloak_dir) {
             Ok(cloak_vars) => {
                 inject_env.extend(cloak_vars);
             }
-            Err(e) => {
-                eprintln!("[rundev] cloak export failed for {}: {}", id, e);
+            Err(_) => {
+                // Cloak failed — .env values are already loaded, just continue.
             }
         }
     }
@@ -575,6 +577,30 @@ pub fn detect_port_in_line(line: &str) -> Option<u16> {
     None
 }
 
+/// Load .env files from the service's working directory.
+/// Reads `.env`, `.env.local`, and `.env.development` (in that order, later wins).
+/// Skips comments and empty lines. Strips surrounding quotes from values.
+fn load_dotenv(dir: &std::path::Path) -> HashMap<String, String> {
+    let mut vars = HashMap::new();
+    for name in &[".env", ".env.local", ".env.development"] {
+        let path = dir.join(name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some((key, val)) = line.split_once('=') {
+                    let key = key.trim().to_string();
+                    let val = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                    vars.insert(key, val);
+                }
+            }
+        }
+    }
+    vars
+}
+
 /// Walk up from `start` to find the nearest directory containing a `.cloak` marker.
 fn find_cloak_root(start: &std::path::Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
@@ -595,9 +621,9 @@ fn cloak_export(working_dir: &std::path::Path) -> Result<HashMap<String, String>
     let output = std::process::Command::new("cloak")
         .arg("export")
         .current_dir(working_dir)
-        .stdin(std::process::Stdio::inherit()) // Allow TTY for Touch ID / password
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped()) // Capture banner to avoid corrupting TUI
+        .stderr(std::process::Stdio::piped())
         .output()
         .map_err(|e| anyhow::anyhow!("Failed to run `cloak export`: {}", e))?;
 
@@ -788,7 +814,7 @@ mod tests {
 
     #[test]
     fn detect_port_no_false_positive_random_text() {
-        assert_eq!(detect_port_in_line("Compiling rundev v0.2.7"), None);
+        assert_eq!(detect_port_in_line("Compiling rundev v0.2.8"), None);
     }
 
     #[test]
@@ -889,6 +915,56 @@ mod tests {
         // No .cloak anywhere in temp — will walk up and find nothing
         // (unless someone has .cloak in /tmp, which is unlikely)
         assert_eq!(find_cloak_root(&dir), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── load_dotenv / find_dotenv_root ───────────────────────────────────
+
+    #[test]
+    fn load_dotenv_from_current_dir() {
+        let dir = std::env::temp_dir().join(format!("rundev_dotenv_cur_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "FOO=bar\nBAZ=qux\n").unwrap();
+
+        let vars = load_dotenv(&dir);
+        assert_eq!(vars.get("FOO").unwrap(), "bar");
+        assert_eq!(vars.get("BAZ").unwrap(), "qux");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_dotenv_strips_quotes() {
+        let dir = std::env::temp_dir().join(format!("rundev_dotenv_quotes_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "A=\"hello\"\nB='world'\n").unwrap();
+
+        let vars = load_dotenv(&dir);
+        assert_eq!(vars.get("A").unwrap(), "hello");
+        assert_eq!(vars.get("B").unwrap(), "world");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_dotenv_skips_comments() {
+        let dir = std::env::temp_dir().join(format!("rundev_dotenv_comments_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "# comment\nKEY=val\n").unwrap();
+
+        let vars = load_dotenv(&dir);
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars.get("KEY").unwrap(), "val");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_dotenv_local_overrides_env() {
+        let dir = std::env::temp_dir().join(format!("rundev_dotenv_override_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "KEY=base\n").unwrap();
+        std::fs::write(dir.join(".env.local"), "KEY=local\n").unwrap();
+
+        let vars = load_dotenv(&dir);
+        assert_eq!(vars.get("KEY").unwrap(), "local");
         std::fs::remove_dir_all(&dir).ok();
     }
 
