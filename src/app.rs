@@ -45,7 +45,7 @@ use crate::core::ssl::ensure_ssl;
 /// Transitions:
 /// - `[a]` from dashboard  → `AddServicePath` (or `AddProjectName` if no projects)
 /// - `[n]` from dashboard  → `AddProjectName`
-/// - `[e]` from dashboard  → `RenameProject` / `RenameService`
+/// - `[e]` from dashboard  → `RenameProject` / `EditServiceMenu`
 /// - `[Esc]` always steps back or closes the wizard
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -93,12 +93,25 @@ pub enum WizardState {
     RenameProject { project_idx: usize, input: String },
     RenameService { project_idx: usize, old_name: String, input: String },
 
+    // Edit service settings
+    EditServiceMenu { project_idx: usize, service_idx: usize, selected: usize },
+    EditServiceField { project_idx: usize, svc_name: String, field: EditField, input: String, hint: String },
+
     // Delete confirmation
     /// `service_name` = None means delete the whole project; Some means delete that service.
     ConfirmDelete { project_idx: usize, service_name: Option<String>, display_name: String },
 
     // Service context menu (opened with Enter on a selected service)
     ServiceMenu { project_idx: usize, service_idx: usize },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditField {
+    Name,
+    Command,
+    Path,
+    Subdomain,
+    NodeVersion,
 }
 
 impl WizardState {
@@ -218,12 +231,11 @@ impl AppState {
                 svc_config.port,
                 svc_config.env.clone(),
             );
-            proc.proxied = true;
-
             if let Some(&pid) = saved_pids.get(&id) {
                 if pid_exists(pid) {
                     proc.pid = Some(pid);
                     proc.status = ProcessStatus::Running;
+                    proc.proxied = true;
                 } else {
                     proc.status = ProcessStatus::Crashed {
                         exit_code: -1,
@@ -347,12 +359,16 @@ pub async fn run_app(
     // Kill orphaned processes from any previous session (e.g. after a crash).
     kill_orphaned_pids().await;
 
+    // Clean /etc/hosts immediately — remove stale entries from previous sessions
+    // (e.g. after a crash or kill -9 where graceful_shutdown never ran).
+    // Only running services (with live PIDs) will have proxied=true at this point.
+    update_hosts_for_state(&mut state);
+
     sync_proxy_routes(&state, &route_table).await;
 
     let mut resource_monitor = ResourceMonitor::new();
     let mut tick = interval(Duration::from_millis(100));
     let mut resource_tick: u8 = 0;
-    let mut hosts_updated = false;
     let mut events = EventStream::new();
     state.needs_clear = true; // Force full clear on first frame
 
@@ -368,12 +384,6 @@ pub async fn run_app(
 
         tokio::select! {
             _ = tick.tick() => {
-                // Update /etc/hosts once, after first render, without blocking startup.
-                if !hosts_updated {
-                    hosts_updated = true;
-                    update_hosts_for_state(&mut state);
-                }
-
                 resource_tick = resource_tick.wrapping_add(1);
                 // Force a full repaint every ~30s to recover from any terminal corruption
                 // (e.g. after sleep/wake, screen lock, or terminal emulator glitches).
@@ -1106,6 +1116,76 @@ async fn handle_wizard_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             _ => {}
         },
 
+        WizardState::EditServiceMenu { project_idx, service_idx, selected } => {
+            const EDIT_FIELD_COUNT: usize = 5;
+            match key.code {
+                KeyCode::Esc => { state.wizard = WizardState::Inactive; }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let new_sel = if selected == 0 { EDIT_FIELD_COUNT - 1 } else { selected - 1 };
+                    state.wizard = WizardState::EditServiceMenu { project_idx, service_idx, selected: new_sel };
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let new_sel = if selected >= EDIT_FIELD_COUNT - 1 { 0 } else { selected + 1 };
+                    state.wizard = WizardState::EditServiceMenu { project_idx, service_idx, selected: new_sel };
+                }
+                KeyCode::Enter => {
+                    if let Some(proc) = state.projects.get(project_idx)
+                        .and_then(|pv| pv.processes.get(service_idx))
+                    {
+                        let svc_name = proc.id.split('/').last().unwrap_or(&proc.id).to_string();
+                        let svc = state.projects[project_idx].config.services.get(&svc_name);
+                        let (field, current) = match selected {
+                            0 => (EditField::Name, svc_name.clone()),
+                            1 => (EditField::Command, svc.map(|s| s.command.clone()).unwrap_or_default()),
+                            2 => (EditField::Path, svc.map(|s| s.path.clone()).unwrap_or_default()),
+                            3 => (EditField::Subdomain, svc.map(|s| s.subdomain.clone()).unwrap_or_default()),
+                            _ => (EditField::NodeVersion, svc.and_then(|s| s.node_version.clone()).unwrap_or_default()),
+                        };
+                        let hint = format!("current: {}", if current.is_empty() { "(none)" } else { &current });
+                        state.wizard = WizardState::EditServiceField {
+                            project_idx,
+                            svc_name,
+                            field,
+                            input: current,
+                            hint,
+                        };
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        WizardState::EditServiceField { project_idx, svc_name, field, mut input, hint } => match key.code {
+            KeyCode::Esc => {
+                // Back to edit menu — find service index
+                let svc_idx = state.projects.get(project_idx)
+                    .and_then(|pv| pv.processes.iter().position(|p| {
+                        p.id.split('/').last().unwrap_or(&p.id) == svc_name
+                    }))
+                    .unwrap_or(0);
+                state.wizard = WizardState::EditServiceMenu { project_idx, service_idx: svc_idx, selected: 0 };
+            }
+            KeyCode::Backspace => {
+                input.pop();
+                state.wizard = WizardState::EditServiceField { project_idx, svc_name, field, input, hint };
+            }
+            KeyCode::Enter => {
+                let value = input.trim().to_string();
+                if field == EditField::Name {
+                    if !value.is_empty() {
+                        complete_rename_service(state, project_idx, svc_name, value);
+                    }
+                } else {
+                    complete_edit_service_field(state, project_idx, &svc_name, &field, &value);
+                }
+            }
+            KeyCode::Char(c) => {
+                input.push(c);
+                state.wizard = WizardState::EditServiceField { project_idx, svc_name, field, input, hint };
+            }
+            _ => {}
+        },
+
         WizardState::ServiceMenu { project_idx, service_idx } => {
             state.wizard = WizardState::Inactive;
             state.selected_project = project_idx;
@@ -1319,6 +1399,53 @@ fn complete_rename_service(
     state.run_message = Some(format!("renamed to '{}'", new_name));
 }
 
+fn complete_edit_service_field(
+    state: &mut AppState,
+    proj_idx: usize,
+    svc_name: &str,
+    field: &EditField,
+    value: &str,
+) {
+    if proj_idx >= state.projects.len() {
+        state.wizard = WizardState::Inactive;
+        return;
+    }
+
+    let svc = match state.projects[proj_idx].config.services.get_mut(svc_name) {
+        Some(s) => s,
+        None => {
+            state.run_message = Some(format!("service '{}' not found", svc_name));
+            state.wizard = WizardState::Inactive;
+            return;
+        }
+    };
+
+    let field_label = match field {
+        EditField::Command => { svc.command = value.to_string(); "command" }
+        EditField::Path => { svc.path = value.to_string(); "path" }
+        EditField::Subdomain => { svc.subdomain = value.to_string(); "subdomain" }
+        EditField::NodeVersion => {
+            svc.node_version = if value.is_empty() { None } else { Some(value.to_string()) };
+            "node version"
+        }
+        EditField::Name => { state.wizard = WizardState::Inactive; return; } // handled separately
+    };
+
+    if let Err(e) = save_project(&state.projects[proj_idx].config) {
+        state.run_message = Some(format!("error saving: {}", e));
+    } else {
+        state.run_message = Some(format!("{} updated — restart service to apply", field_label));
+    }
+
+    // Return to edit menu
+    let svc_idx = state.projects.get(proj_idx)
+        .and_then(|pv| pv.processes.iter().position(|p| {
+            p.id.split('/').last().unwrap_or(&p.id) == svc_name
+        }))
+        .unwrap_or(0);
+    state.wizard = WizardState::EditServiceMenu { project_idx: proj_idx, service_idx: svc_idx, selected: 0 };
+}
+
 fn open_delete_confirm(state: &mut AppState) {
     if state.projects.is_empty() { return; }
     let proj_idx = state.selected_project;
@@ -1478,15 +1605,12 @@ fn open_rename_wizard(state: &mut AppState) {
     let proj_idx = state.selected_project;
 
     if let Some(svc_idx) = state.selected_service {
-        // Rename the selected service — get name from process ID
-        if let Some(proc) = state.projects[proj_idx].processes.get(svc_idx) {
-            let old_name = proc.id.split('/').last().unwrap_or("").to_string();
-            state.wizard = WizardState::RenameService {
-                project_idx: proj_idx,
-                old_name: old_name.clone(),
-                input: old_name,
-            };
-        }
+        // Open edit menu for the selected service
+        state.wizard = WizardState::EditServiceMenu {
+            project_idx: proj_idx,
+            service_idx: svc_idx,
+            selected: 0,
+        };
     } else {
         // Rename the selected project
         let name = state.projects[proj_idx].config.name.clone();

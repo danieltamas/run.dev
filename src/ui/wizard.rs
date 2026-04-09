@@ -16,7 +16,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, WizardState};
+use crate::app::{AppState, EditField, WizardState};
 use crate::core::process::ProcessStatus;
 use crate::core::scanner::DetectedCommand;
 
@@ -148,6 +148,21 @@ pub fn render_wizard(f: &mut Frame, app: &AppState) {
                 Some(&hint),
                 "[enter] confirm  [esc] cancel",
             );
+        }
+
+        WizardState::EditServiceMenu { project_idx, service_idx, selected } => {
+            render_edit_menu(f, app, *project_idx, *service_idx, *selected);
+        }
+
+        WizardState::EditServiceField { field, input, hint, .. } => {
+            let (title, label) = match field {
+                EditField::Name => (" edit name ", "name"),
+                EditField::Command => (" edit command ", "command"),
+                EditField::Path => (" edit path ", "path"),
+                EditField::Subdomain => (" edit subdomain ", "subdomain"),
+                EditField::NodeVersion => (" edit node version ", "version"),
+            };
+            render_text_input(f, title, label, input.as_str(), Some(hint.as_str()), "[enter] save  [esc] back");
         }
 
         WizardState::ServiceMenu { project_idx, service_idx } => {
@@ -425,6 +440,76 @@ fn render_service_menu(f: &mut Frame, app: &AppState, project_idx: usize, servic
         Paragraph::new("  [esc] close")
             .style(Style::default().fg(Color::DarkGray)),
         rows[items.len() + 1],
+    );
+}
+
+fn render_edit_menu(f: &mut Frame, app: &AppState, project_idx: usize, service_idx: usize, selected: usize) {
+    let pv = match app.projects.get(project_idx) {
+        Some(p) => p,
+        None => return,
+    };
+    let proc = match pv.processes.get(service_idx) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let svc_name = proc.id.split('/').last().unwrap_or(&proc.id);
+    let svc = pv.config.services.get(svc_name);
+
+    let title = format!(" edit {} ", svc_name);
+    let area = centered_rect(70, 13, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let fields: Vec<(&str, String)> = vec![
+        ("name", svc_name.to_string()),
+        ("command", svc.map(|s| s.command.clone()).unwrap_or_default()),
+        ("path", svc.map(|s| abbreviated_path(&s.path)).unwrap_or_default()),
+        ("subdomain", svc.map(|s| if s.subdomain.is_empty() { "(none)".to_string() } else { s.subdomain.clone() }).unwrap_or_default()),
+        ("node version", svc.and_then(|s| s.node_version.clone()).unwrap_or_else(|| "(none)".to_string())),
+    ];
+
+    let mut constraints: Vec<Constraint> = fields.iter().map(|_| Constraint::Length(1)).collect();
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(1));
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints(constraints)
+        .split(inner);
+
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let is_sel = i == selected;
+        let cursor = if is_sel { "▶ " } else { "  " };
+        let label_style = if is_sel {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let value_style = Style::default().fg(Color::DarkGray);
+
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(cursor, Style::default().fg(Color::Yellow)),
+                Span::styled(format!("{:<14}", label), label_style),
+                Span::styled(value.clone(), value_style),
+            ])),
+            rows[i],
+        );
+    }
+
+    f.render_widget(
+        Paragraph::new("  [enter] edit  [esc] close")
+            .style(Style::default().fg(Color::DarkGray)),
+        rows[fields.len() + 1],
     );
 }
 

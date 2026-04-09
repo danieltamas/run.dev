@@ -378,19 +378,15 @@ where
 
                 let mut pipe_buf = vec![0u8; 65536];
                 loop {
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        upstream_read.read(&mut pipe_buf),
-                    ).await {
-                        Ok(Ok(0)) => break,
-                        Ok(Ok(n)) => {
+                    match upstream_read.read(&mut pipe_buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
                             co.fetch_add(n as u64, Ordering::Relaxed);
                             if client_write.write_all(&pipe_buf[..n]).await.is_err() {
                                 break;
                             }
                             let _ = client_write.flush().await;
                         }
-                        Ok(Err(_)) => break,
                         Err(_) => break,
                     }
                 }

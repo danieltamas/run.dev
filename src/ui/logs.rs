@@ -17,25 +17,50 @@ use ratatui::{
 
 use crate::app::AppState;
 
-/// Strip ANSI escape sequences from a string so raw process output
-/// doesn't interfere with ratatui's own rendering.
+/// Strip ANSI escape sequences and control characters from a string so raw
+/// process output doesn't interfere with ratatui's own rendering.
+///
+/// Handles CSI (`\x1b[...X`), OSC (`\x1b]...BEL/ST`), and two-byte sequences
+/// (`\x1b(B`, `\x1b>`, etc.). Also strips `\r`, `\x08`, and other C0 controls
+/// that can corrupt terminal state over long-running sessions.
 fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
+    let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            // Consume the escape sequence
-            if let Some(next) = chars.next() {
-                if next == '[' {
-                    // CSI sequence: eat until we hit a letter (0x40–0x7E)
+            match chars.peek() {
+                Some('[') => {
+                    // CSI sequence: \x1b[ ... <final byte 0x40–0x7E>
+                    chars.next();
                     for c2 in chars.by_ref() {
-                        if c2.is_ascii_alphabetic() || c2 == 'm' {
+                        if ('\x40'..='\x7e').contains(&c2) {
                             break;
                         }
                     }
                 }
-                // OSC or other sequences — skip the next char and move on
+                Some(']') => {
+                    // OSC sequence: \x1b] ... (terminated by BEL \x07 or ST \x1b\\)
+                    chars.next();
+                    while let Some(c2) = chars.next() {
+                        if c2 == '\x07' {
+                            break;
+                        }
+                        if c2 == '\x1b' {
+                            let _ = chars.next(); // consume the '\\' of ST
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    // Two-byte sequence (\x1b(B, \x1b>, \x1b=, etc.) — skip one char
+                    chars.next();
+                }
+                None => {}
             }
+        } else if c == '\r' || c == '\x08' || (c.is_control() && c != '\n') {
+            // Strip carriage returns, backspaces, and other C0 controls
+            // (keep \n since lines are already split by newline)
+            continue;
         } else {
             out.push(c);
         }
