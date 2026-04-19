@@ -268,35 +268,27 @@
       margin-bottom: 14px;
     }
 
-    .hero h1 {
-      font-family: var(--font-mono);
-      font-size: clamp(40px, 8vw, 72px);
+    .hero h1.hero-ascii {
+      font-family: 'Fira Code', var(--font-mono);
+      font-size: clamp(8px, 2.4vw, 22px);
       font-weight: 700;
-      letter-spacing: -2px;
-      color: #ffffff;
-      margin-bottom: 16px;
+      line-height: 1.15;
+      letter-spacing: 0;
+      color: var(--cyan);
+      margin: 0 0 32px;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
     }
 
-    .hero h1 .dot { color: var(--cyan); }
-
-    .hero-ascii {
-      font-family: 'Fira Code', var(--font-mono);
-      font-size: clamp(10px, 2.4vw, 22px);
-      font-weight: normal;
-      line-height: 1.15;
-      color: var(--cyan);
-      margin-bottom: 32px;
-      white-space: pre;
-      letter-spacing: 0;
+    .hero h1.hero-ascii pre {
+      font: inherit;
+      margin: 0 auto;
+      display: inline-block;
       text-align: left;
     }
 
-    .hero-ascii pre {
-      font: inherit;
-      margin: 0;
-    }
-
-    .hero-ascii .dot-col { color: #ffffff; }
+    .hero h1.hero-ascii .dot-col { color: #ffffff; }
 
     .hero-powered {
       display: flex;
@@ -1007,7 +999,7 @@
       .hero { padding: 80px 16px 40px; min-height: auto; }
       .hero::before { width: 400px; height: 400px; }
       .hero::after { width: 300px; height: 300px; }
-      .hero-ascii { font-size: clamp(7px, 2vw, 14px); margin-bottom: 24px; }
+      .hero h1.hero-ascii { font-size: clamp(7px, 2vw, 14px); margin-bottom: 24px; }
       .hero .tagline { font-size: 17px; margin-bottom: 32px; }
       .hero-powered-note { font-size: 12px; }
       .scroll-hint { display: none; }
@@ -1085,7 +1077,7 @@
     }
 
     @media (max-width: 420px) {
-      .hero-ascii { font-size: 6.5px; }
+      .hero h1.hero-ascii { font-size: 6.5px; }
       .install-box code { font-size: 10.5px; }
       .install-box { padding: 12px 12px; gap: 6px; }
       .pain-item { font-size: 12px; padding: 7px 10px; }
@@ -1416,10 +1408,14 @@
       animation: neon-pulse 2s ease-in-out infinite;
     }
 
-    body.degen .hero-ascii {
+    body.degen .hero h1.hero-ascii {
       color: var(--dg-green);
       animation: glitch 3s ease-in-out infinite;
       text-shadow: 0 0 10px rgba(57,255,20,0.5);
+    }
+
+    body.degen .hero h1.hero-ascii .dot-col {
+      color: var(--dg-pink);
     }
 
     body.degen .hero h1 {
