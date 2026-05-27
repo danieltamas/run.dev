@@ -1,7 +1,7 @@
 ---
 name: rundev-local-dev
 description: Local dev environment manager. Process management, automatic HTTPS domains, SSL certificates, reverse proxy, and AI crash diagnosis — single binary, zero config.
-version: 0.3.0
+version: 0.3.1
 ---
 
 # SKLL — run.dev
@@ -21,8 +21,8 @@ version: 0.3.0
 - **Author**: Daniel Tamas <hello@danieltamas.com>
 - **Website**: https://getrun.dev
 - **Source**: https://github.com/danieltamas/run.dev
-- **Version**: 0.3.0
-- **Released**: 2026-03-17
+- **Version**: 0.3.1
+- **Released**: 2026-05-27
 
 ---
 

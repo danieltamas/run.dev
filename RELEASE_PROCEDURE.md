@@ -8,14 +8,14 @@
 
 Example:
 ```bash
-./release.sh 0.3.0 "feat: new wizard flow"
+./release.sh 0.3.1 "feat: new wizard flow"
 ```
 
 The script handles everything: version bump across all files, Cargo.lock update, tests, macOS build, Linux build (Docker), commit, and tag. At the end it prints the push + release commands for you to run manually (SSH agent needs your approval).
 
 Dry run (bumps files but skips builds/commit):
 ```bash
-./release.sh 0.3.0 "feat: whatever" --dry-run
+./release.sh 0.3.1 "feat: whatever" --dry-run
 ```
 
 ### After the script finishes
@@ -24,8 +24,8 @@ Run the three commands it prints:
 
 ```bash
 git push origin main
-git push origin v0.3.0
-gh release create v0.3.0 --title "v0.3.0" --notes "feat: whatever" rundev-darwin-arm64 rundev-linux-amd64
+git push origin v0.3.1
+gh release create v0.3.1 --title "v0.3.1" --notes "feat: whatever" rundev-darwin-arm64 rundev-linux-amd64
 ```
 
 Then clean up:

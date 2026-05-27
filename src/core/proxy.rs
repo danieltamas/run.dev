@@ -16,7 +16,17 @@ use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
+
+/// Cap on concurrent proxied connections. Anything over this gets accepted
+/// and immediately dropped — better than blowing past the FD limit.
+const MAX_CONCURRENT_CONNS: usize = 512;
+
+/// Idle-read timeout. If neither side sends a byte for this long, the
+/// connection is torn down. Catches zombie sockets from Wi-Fi sleep,
+/// force-quits, or clients that vanish without sending FIN/RST.
+const IDLE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub struct ProxyRoute {
     pub domain: String,
@@ -64,18 +74,32 @@ pub type RouteTable = Arc<RwLock<Vec<ProxyRoute>>>;
 
 pub async fn run_proxy(routes: RouteTable, listen_port: u16) -> Result<()> {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port)).await?;
-    tracing_or_eprintln(format!("Proxy listening on 127.0.0.1:{}", listen_port));
+    proxy_log(&format!("Proxy listening on 127.0.0.1:{}", listen_port));
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
 
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
                 let routes = routes.clone();
+                let permit = match sem.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        proxy_log("HTTP proxy: connection cap reached, dropping connection");
+                        drop(stream);
+                        continue;
+                    }
+                };
                 tokio::spawn(async move {
                     let _ = handle_connection(stream, routes, false).await;
+                    drop(permit);
                 });
             }
             Err(e) => {
-                eprintln!("Proxy accept error: {}", e);
+                proxy_log(&format!("Proxy accept error: {}", e));
+                // EMFILE/ENFILE: yield and back off so we don't spin and spam logs
+                if matches!(e.raw_os_error(), Some(libc::EMFILE) | Some(libc::ENFILE)) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
             }
         }
     }
@@ -85,7 +109,7 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
     let cert_dir = crate::core::ssl::certs_dir();
     let resolver = SniCertResolver::new(&cert_dir);
     if resolver.is_empty() {
-        eprintln!("HTTPS proxy: no certs found in {}, skipping TLS listener", cert_dir.display());
+        proxy_log(&format!("HTTPS proxy: no certs found in {}, skipping TLS listener", cert_dir.display()));
         return Ok(());
     }
 
@@ -99,13 +123,22 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port)).await?;
-    tracing_or_eprintln(format!("HTTPS proxy listening on 127.0.0.1:{}", listen_port));
+    proxy_log(&format!("HTTPS proxy listening on 127.0.0.1:{}", listen_port));
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
 
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
                 let acceptor = acceptor.clone();
                 let routes = routes.clone();
+                let permit = match sem.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        proxy_log("HTTPS proxy: connection cap reached, dropping connection");
+                        drop(stream);
+                        continue;
+                    }
+                };
                 tokio::spawn(async move {
                     // Timeout the TLS handshake so bad clients don't hold connections forever
                     let tls_result = tokio::time::timeout(
@@ -116,10 +149,15 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
                         Ok(Ok(tls_stream)) => { let _ = handle_connection(tls_stream, routes, true).await; }
                         _ => {} // TLS handshake failed or timed out — ignore
                     }
+                    drop(permit);
                 });
             }
             Err(e) => {
-                eprintln!("HTTPS proxy accept error: {}", e);
+                proxy_log(&format!("HTTPS proxy accept error: {}", e));
+                // EMFILE/ENFILE: yield and back off so we don't spin and spam logs
+                if matches!(e.raw_os_error(), Some(libc::EMFILE) | Some(libc::ENFILE)) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
             }
         }
     }
@@ -294,13 +332,13 @@ where
             async {
                 let mut buf = vec![0u8; 65536];
                 loop {
-                    match client_read.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
+                    match tokio::time::timeout(IDLE_READ_TIMEOUT, client_read.read(&mut buf)).await {
+                        Ok(Ok(0)) => break,
+                        Ok(Ok(n)) => {
                             ci.fetch_add(n as u64, Ordering::Relaxed);
                             if upstream_write.write_all(&buf[..n]).await.is_err() { break; }
                         }
-                        Err(_) => break,
+                        _ => break, // error or idle timeout
                     }
                 }
                 Ok::<_, std::io::Error>(())
@@ -308,13 +346,13 @@ where
             async {
                 let mut buf = vec![0u8; 65536];
                 loop {
-                    match upstream_read.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
+                    match tokio::time::timeout(IDLE_READ_TIMEOUT, upstream_read.read(&mut buf)).await {
+                        Ok(Ok(0)) => break,
+                        Ok(Ok(n)) => {
                             co.fetch_add(n as u64, Ordering::Relaxed);
                             if client_write.write_all(&buf[..n]).await.is_err() { break; }
                         }
-                        Err(_) => break,
+                        _ => break, // error or idle timeout
                     }
                 }
                 Ok::<_, std::io::Error>(())
@@ -335,13 +373,13 @@ where
         let fwd = async {
             let mut buf = vec![0u8; 65536];
             loop {
-                match client_read.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
+                match tokio::time::timeout(IDLE_READ_TIMEOUT, client_read.read(&mut buf)).await {
+                    Ok(Ok(0)) => break,
+                    Ok(Ok(n)) => {
                         ci.fetch_add(n as u64, Ordering::Relaxed);
                         if upstream_write.write_all(&buf[..n]).await.is_err() { break; }
                     }
-                    Err(_) => break,
+                    _ => break, // error or idle timeout
                 }
             }
             Ok::<_, std::io::Error>(0u64)
@@ -378,16 +416,16 @@ where
 
                 let mut pipe_buf = vec![0u8; 65536];
                 loop {
-                    match upstream_read.read(&mut pipe_buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
+                    match tokio::time::timeout(IDLE_READ_TIMEOUT, upstream_read.read(&mut pipe_buf)).await {
+                        Ok(Ok(0)) => break,
+                        Ok(Ok(n)) => {
                             co.fetch_add(n as u64, Ordering::Relaxed);
                             if client_write.write_all(&pipe_buf[..n]).await.is_err() {
                                 break;
                             }
                             let _ = client_write.flush().await;
                         }
-                        Err(_) => break,
+                        _ => break, // error or idle timeout
                     }
                 }
             }
@@ -1118,6 +1156,3 @@ fn proxy_log(msg: &str) {
     }
 }
 
-fn tracing_or_eprintln(msg: String) {
-    eprintln!("{}", msg);
-}
