@@ -19,6 +19,7 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::interval;
@@ -32,10 +33,17 @@ use crate::core::process::{
     ManagedProcess,
     ProcessStatus, SharedProcess,
 };
-use crate::core::proxy::{activate_port_forwarding, new_route_table, run_proxy, run_https_proxy, update_routes, ProxyRoute, RouteTable};
+use crate::core::proxy::{activate_port_forwarding, new_route_table, redirect_reachable, run_proxy, run_https_proxy, self_heal_once, update_routes, ProxyRoute, RouteTable};
 use crate::core::resources::ResourceMonitor;
 use crate::core::scanner::{clean_service_name, detect_commands, DetectedCommand};
 use crate::core::ssl::ensure_ssl;
+
+/// Shown in the error bar while the 80/443 → 1111/1112 redirect is down and the
+/// self-heal task is re-applying port forwarding. Set and cleared automatically
+/// by the run loop from the shared reachability flag — never set by the user, so
+/// we only touch the error bar when it's free and only clear our own message.
+const PROXY_STALE_MSG: &str =
+    "port forwarding inactive — re-applying; if this persists, run `rundev setup`";
 
 // ── Wizard state machine ───────────────────────────────────────────────────────
 
@@ -313,6 +321,11 @@ pub async fn run_app(
 
     let route_table = new_route_table();
 
+    // Shared health of the port-forward redirect, updated by the self-heal task
+    // below and read by the run loop to keep the dashboard honest. Starts `true`
+    // so the UI doesn't flash a warning before the first probe (~5s in).
+    let proxy_reachable = Arc::new(AtomicBool::new(true));
+
     if !state.no_proxy {
         // Ensure SSL certs exist for all project domains before starting the HTTPS proxy.
         // Generate SSL certs for all project domains before starting the HTTPS
@@ -353,6 +366,31 @@ pub async fn run_app(
             }
         });
 
+        // Self-heal the port-forward redirect. The pfctl (macOS) / iptables (Linux)
+        // rules silently go stale after sleep/wake or when Docker/firewalld reload
+        // their own tables: the listeners stay up, but browser traffic to :80/:443
+        // stops reaching them, so domains die until the user restarts rundev. Probe
+        // every 5s and re-apply *only* when the redirect is actually down — that
+        // avoids sudo spam and avoids needlessly flushing other tools' nat rules.
+        // Re-application reuses the existing NOPASSWD pfctl/iptables path (granted by
+        // `rundev setup`), so it adds no new privileged surface.
+        let reachable_bg = proxy_reachable.clone();
+        tokio::spawn(async move {
+            let mut probe = interval(Duration::from_secs(5));
+            probe.tick().await; // consume the immediate first tick
+            loop {
+                probe.tick().await;
+                let ok = self_heal_once(redirect_reachable, || async {
+                    // activate_port_forwarding shells out synchronously to
+                    // `sudo -n pfctl`/`iptables`; run it off-runtime so a slow
+                    // pfctl can never stall the proxy or render loop.
+                    let _ = tokio::task::spawn_blocking(activate_port_forwarding).await;
+                })
+                .await;
+                reachable_bg.store(ok, Ordering::Relaxed);
+            }
+        });
+
         state.proxy_running = true;
     }
 
@@ -375,6 +413,23 @@ pub async fn run_app(
     loop {
         sync_process_states(&mut state).await;
         state.recalculate_mood();
+
+        // Keep the dashboard honest about the proxy: `proxy_running` now tracks
+        // whether the redirect actually reaches our listeners, not just that we
+        // spawned them. Surface a transient warning in the (otherwise free) error
+        // bar while the self-heal task re-applies forwarding, and clear our own
+        // message once domains are reachable again — without clobbering real errors.
+        if !state.no_proxy {
+            let reachable = proxy_reachable.load(Ordering::Relaxed);
+            state.proxy_running = reachable;
+            if !reachable {
+                if state.error_message.is_none() {
+                    state.error_message = Some(PROXY_STALE_MSG.to_string());
+                }
+            } else if state.error_message.as_deref() == Some(PROXY_STALE_MSG) {
+                state.error_message = None;
+            }
+        }
 
         if state.needs_clear {
             terminal.clear()?;

@@ -8,14 +8,14 @@
 
 Example:
 ```bash
-./release.sh 0.3.1 "feat: new wizard flow"
+./release.sh 0.3.2 "feat: new wizard flow"
 ```
 
 The script handles everything: version bump across all files, Cargo.lock update, tests, macOS build, Linux build (Docker), commit, and tag. At the end it prints the push + release commands for you to run manually (SSH agent needs your approval).
 
 Dry run (bumps files but skips builds/commit):
 ```bash
-./release.sh 0.3.1 "feat: whatever" --dry-run
+./release.sh 0.3.2 "feat: whatever" --dry-run
 ```
 
 ### After the script finishes
@@ -24,13 +24,13 @@ Run the three commands it prints:
 
 ```bash
 git push origin main
-git push origin v0.3.1
-gh release create v0.3.1 --title "v0.3.1" --notes "feat: whatever" rundev-darwin-arm64 rundev-linux-amd64
+git push origin v0.3.2
+gh release create v0.3.2 --title "v0.3.2" --notes "feat: whatever" rundev-macos-aarch64 rundev-macos-x86_64 rundev-linux-x86_64
 ```
 
 Then clean up:
 ```bash
-rm -f rundev-darwin-arm64 rundev-linux-amd64
+rm -f rundev-macos-aarch64 rundev-macos-x86_64 rundev-linux-x86_64
 ```
 
 ---
@@ -54,7 +54,6 @@ The script checks all of these and fails early with a clear message if something
 | File | What changes |
 |------|-------------|
 | `Cargo.toml` | `version = "X.Y.Z"` |
-| `src/main.rs` | clap `version = "X.Y.Z"` |
 | `README.md` | Badge + ASCII art |
 | `SKILL.md` | `**Version**: X.Y.Z` |
 | `rundev/SKILL.md` | Frontmatter + body |
@@ -64,14 +63,16 @@ The script checks all of these and fails early with a clear message if something
 
 3. `cargo update --workspace` — syncs Cargo.lock
 4. `cargo test` — catches breakage
-5. `cargo build --release` → copies `rundev-darwin-arm64`
-6. Docker Linux build → copies `rundev-linux-amd64`
-7. Rebuilds macOS (Docker overwrites `target/`)
+5. Builds macOS **arm64 + x86_64** (`--target aarch64-apple-darwin` / `x86_64-apple-darwin`) → `rundev-macos-aarch64`, `rundev-macos-x86_64`
+6. Docker Linux build → `rundev-linux-x86_64`
+7. Rebuilds macOS default target (Docker overwrites `target/release/`)
 8. Commits all bumped files
 9. Tags `vX.Y.Z`
 10. Prints push + release commands
 
-`src/ui/dashboard.rs` reads version via `env!("CARGO_PKG_VERSION")` at compile time — no manual edit needed.
+`src/ui/dashboard.rs` and `src/main.rs` read the version via `env!("CARGO_PKG_VERSION")` at compile time — no manual edit needed.
+
+> **Asset names matter.** Release artifacts must match what `install.sh` downloads: `rundev-<macos|linux>-<aarch64|x86_64>` (derived from `uname -s` / `uname -m`). Mismatched names make `curl | sh` 404 the prebuilt binary and silently fall back to a slow source build. The macOS toolchain here is `x86_64-apple-darwin` (Rosetta), so the arm64 asset **must** be built with `--target aarch64-apple-darwin`, not the default host build.
 
 ---
 

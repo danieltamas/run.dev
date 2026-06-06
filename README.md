@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2021-orange?style=flat-square&logo=rust" alt="Rust 2021" />
-  <img src="https://img.shields.io/badge/version-0.3.1-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.2-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/AI-Claude%20powered-blueviolet?style=flat-square" alt="AI Powered" />
@@ -45,7 +45,7 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝       [/] ask the AI anything
 
   Daniel Tamas
-  hello@danieltamas.com                                       2 projects  configured  v0.3.1
+  hello@danieltamas.com                                       2 projects  configured  v0.3.2
 
   projects ────────────────────────────────────────────────────────────────────────
           service                            url                       local           mem   cpu
@@ -281,6 +281,9 @@ Run.dev uses mkcert to generate locally-trusted certs — green padlock out of t
 
 **Does it work with Chrome's DNS-over-HTTPS?**
 Chrome with "Use secure DNS" enabled bypasses `/etc/hosts` entirely. If your local domains aren't resolving, go to `chrome://settings/security` and disable "Use secure DNS". Safari, Firefox, curl, and all other tools work out of the box — run.dev writes both IPv4 and IPv6 entries to prevent Happy Eyeballs from falling back to production addresses.
+
+**My domains stopped working after a while, but the dashboard says the proxy is running.**
+This used to happen when the OS dropped run.dev's port-forwarding rules underneath it — macOS flushes them across sleep/wake, and Docker or a firewall reload can wipe them on Linux. The listeners stayed up (so the dashboard looked fine) but browser traffic no longer reached them. run.dev now re-checks the redirect every few seconds and re-applies it automatically, so it recovers without a restart; you'll briefly see a "port forwarding inactive — re-applying" notice while it heals. Run `rundev doctor` to confirm the redirect is routing.
 
 **What about Windows?**
 Not yet. macOS and Linux only. WSL might work but isn't tested.

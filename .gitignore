@@ -3,6 +3,8 @@
 SPEC.md
 target
 release.sh
-rundev-darwin-arm64
-rundev-linux-amd64
+rundev-macos-aarch64
+rundev-macos-x86_64
+rundev-linux-x86_64
+rundev-linux-aarch64
 Cross.toml

@@ -26,6 +26,7 @@ Developers running multiple services locally — microservices, frontends, APIs.
 3. Port 443 forwards to 8443 via pfctl (macOS) or iptables (Linux)
 4. run.dev's HTTPS proxy reads SNI, picks the right SSL cert
 5. Host header maps to a route, traffic proxies to the service's localhost port
+6. A self-heal task re-applies the port forward if it goes stale (sleep/wake, Docker), so domains keep working without a restart
 
 ## Tech stack
 
@@ -60,7 +61,7 @@ Requirements: Rust toolchain. No Node, Python, Docker, or external certificate t
 - `rundev down [project]` — stop project(s)
 - `rundev status` — quick status check
 - `rundev list` — list all projects and services
-- `rundev doctor` — health check (ports, certs, hosts, helper)
+- `rundev doctor` — health check (ports, certs, hosts, helper, redirect routing)
 - `rundev clean` — stop everything, remove /etc/hosts entries
 - `rundev setup` — install privileged helper + port forwarding
 

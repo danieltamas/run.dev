@@ -396,10 +396,11 @@ where
                     break;
                 }
                 if filled >= buf.len() { break; }
-                match upstream_read.read(&mut buf[filled..]).await {
-                    Ok(0) => break,
-                    Ok(n) => filled += n,
-                    Err(_) => break,
+                match tokio::time::timeout(IDLE_READ_TIMEOUT, upstream_read.read(&mut buf[filled..])).await {
+                    Ok(Ok(0)) => break,
+                    Ok(Ok(n)) => filled += n,
+                    _ => break, // error or idle timeout — a silent upstream must not
+                                // pin this task's permit + FDs forever (FD exhaustion)
                 }
             }
             if filled > 0 {
@@ -684,6 +685,54 @@ fn find_route(routes: &[ProxyRoute], host: Option<&str>) -> Option<(u16, Arc<Ato
     None
 }
 
+/// Port we probe to decide whether the 80/443 → 1111/1112 redirect is live.
+///
+/// We probe **:80** rather than :443 because the HTTP listener on 1111 always
+/// exists, whereas the HTTPS listener on 1112 is skipped when no certs are
+/// present — probing :443 would then false-negative. pf/iptables installs the
+/// :80 and :443 redirect rules atomically, so :80 reachability stands in for the
+/// whole ruleset. A loopback connect to :80 follows the exact same rdr/REDIRECT
+/// path the browser does, so it faithfully reports what the user will experience.
+const REDIRECT_PROBE_PORT: u16 = 80;
+
+/// True if the port-forward redirect is currently routing loopback traffic to our
+/// listeners. Cheap — one short-lived TCP connect with a tight timeout — so it's
+/// safe to call on a timer. When pf/iptables rules are flushed (sleep/wake on
+/// macOS, or Docker/firewalld reloading their tables on Linux) nothing answers on
+/// :80 and this returns `false`, which is the signal to re-apply the redirect.
+pub async fn redirect_reachable() -> bool {
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            TcpStream::connect(("127.0.0.1", REDIRECT_PROBE_PORT)),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
+/// One iteration of the self-heal loop: probe the redirect and, only if it's
+/// down, re-apply port forwarding. Returns the observed reachability so the
+/// caller can surface it in the UI.
+///
+/// Generic over the probe/apply steps so the decision logic ("re-apply iff the
+/// redirect is down") is unit-testable without touching the network or pfctl —
+/// the production caller passes [`redirect_reachable`] and
+/// [`activate_port_forwarding`].
+pub async fn self_heal_once<P, PF, A, AF>(probe: P, apply: A) -> bool
+where
+    P: FnOnce() -> PF,
+    PF: std::future::Future<Output = bool>,
+    A: FnOnce() -> AF,
+    AF: std::future::Future<Output = ()>,
+{
+    let reachable = probe().await;
+    if !reachable {
+        apply().await;
+    }
+    reachable
+}
+
 /// Activate port forwarding so the proxy receives browser traffic on 80/443
 /// without binding privileged ports. No-op if setup hasn't been run yet.
 pub fn activate_port_forwarding() {
@@ -731,7 +780,10 @@ fn activate_pf() {
         std::time::Duration::from_millis(500),
     );
     if verify.is_err() {
-        eprintln!("⚠️  port forwarding may not be active — try `rundev setup`");
+        // Route to the proxy log, not stderr: this runs under the TUI's alternate
+        // screen (both at startup and from the periodic self-heal task), and stray
+        // stderr corrupts ratatui's cell model and garbles the dashboard.
+        proxy_log("⚠️  port forwarding may not be active — try `rundev setup`");
     }
 }
 
@@ -936,6 +988,87 @@ mod tests {
         let t = table.read().unwrap();
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].domain, "b.local");
+    }
+
+    // ── self_heal_once (redirect re-assertion decision) ───────────────────────
+    // Regression for "proxy shows running but domains stop resolving until
+    // restart": the pf/iptables redirect was applied once at startup and never
+    // re-asserted, so a sleep/wake (macOS) or Docker/firewalld reload (Linux)
+    // left the listeners up but unreachable. The self-heal loop must re-apply
+    // forwarding when — and only when — the redirect is actually down.
+
+    #[tokio::test]
+    async fn self_heal_reapplies_when_redirect_is_down() {
+        use std::sync::atomic::AtomicBool;
+        let applied = Arc::new(AtomicBool::new(false));
+        let a = applied.clone();
+        let reachable = self_heal_once(
+            || async { false },
+            || async move { a.store(true, Ordering::Relaxed); },
+        )
+        .await;
+        assert!(!reachable);
+        assert!(
+            applied.load(Ordering::Relaxed),
+            "must re-apply port forwarding when the redirect is down"
+        );
+    }
+
+    #[tokio::test]
+    async fn self_heal_leaves_pf_alone_when_redirect_is_healthy() {
+        use std::sync::atomic::AtomicBool;
+        let applied = Arc::new(AtomicBool::new(false));
+        let a = applied.clone();
+        let reachable = self_heal_once(
+            || async { true },
+            || async move { a.store(true, Ordering::Relaxed); },
+        )
+        .await;
+        assert!(reachable);
+        assert!(
+            !applied.load(Ordering::Relaxed),
+            "must not touch pfctl/iptables while the redirect is working (no sudo spam, \
+             no disturbing other nat rules)"
+        );
+    }
+
+    // ── handle_connection idle timeout (permit/FD leak) ───────────────────────
+
+    #[tokio::test(start_paused = true)]
+    async fn handle_connection_aborts_on_silent_upstream() {
+        // Regression: the upstream response-header read had no idle timeout, so an
+        // upstream that accepts the TCP connection but never replies pinned this
+        // connection's semaphore permit + FDs forever, eventually exhausting the
+        // 512-permit budget (proxy "running" but every new connection dropped).
+        let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = upstream.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _accepted = upstream.accept().await.unwrap();
+            // Hold the socket open, never write a byte; outlive the idle timeout.
+            tokio::time::sleep(std::time::Duration::from_secs(86_400)).await;
+        });
+
+        let table = new_route_table();
+        update_routes(&table, vec![route("app.local", port)]).await;
+
+        // In-memory client connection; feed the request through the test half.
+        let (client_side, mut test_side) = tokio::io::duplex(65536);
+        test_side
+            .write_all(b"GET / HTTP/1.1\r\nHost: app.local\r\n\r\n")
+            .await
+            .unwrap();
+
+        // With the idle timeout in place this resolves (in virtual time, thanks to
+        // start_paused) rather than hanging on the upstream's missing headers.
+        let res = tokio::time::timeout(
+            IDLE_READ_TIMEOUT + std::time::Duration::from_secs(60),
+            handle_connection(client_side, table, false),
+        )
+        .await;
+        assert!(
+            res.is_ok(),
+            "handle_connection hung past the idle timeout on a silent upstream"
+        );
     }
 
     // ── inject_proxy_headers ────────────────────────────────────────────────

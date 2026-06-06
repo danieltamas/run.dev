@@ -15,8 +15,8 @@
 - **Author**: Daniel Tamas <hello@danieltamas.com>
 - **Website**: https://getrun.dev
 - **Source**: https://github.com/danieltamas/run.dev
-- **Version**: 0.3.1
-- **Released**: 2026-05-27
+- **Version**: 0.3.2
+- **Released**: 2026-06-06
 
 ---
 
@@ -102,7 +102,7 @@ rundev down [project]       # Stop project(s)
 rundev status               # Quick status check (no TUI)
 rundev list                 # List all projects and services
 rundev remove <project>     # Delete a project config
-rundev doctor               # Health check — ports, certs, hosts, helper
+rundev doctor               # Health check — ports, certs, hosts, helper, redirect
 rundev clean                # Stop everything, remove /etc/hosts entries
 rundev setup                # Re-install privileged helper + port forwarding
 rundev uninstall            # Reverse all system changes
@@ -186,7 +186,7 @@ claude_proxy: http://localhost:3456/v1   # optional: Claude Code proxy for AI fe
 ```
 Browser → https://api.myapp.local
   → /etc/hosts resolves to 127.0.0.1
-  → Port 443 forwards to 1112 (pfctl/iptables, localhost only)
+  → Port 443 forwards to 1112 (pfctl/iptables, localhost only; auto re-applied if the redirect goes stale after sleep/wake or a Docker/firewall reload)
   → run.dev HTTPS proxy reads SNI, loads cert from disk
   → Host header → route table lookup → localhost:4000
   → Bidirectional TCP proxy to service

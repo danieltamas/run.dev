@@ -1,6 +1,6 @@
 [package]
 name = "rundev"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 
 [dependencies]
@@ -24,6 +24,11 @@ rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2"
 rcgen = "0.13"
 shlex = "1"
+
+[dev-dependencies]
+# `full` does not include `test-util`; the proxy idle-timeout regression test
+# uses `#[tokio::test(start_paused = true)]` to fast-forward virtual time.
+tokio = { version = "1", features = ["test-util"] }
 
 [features]
 default = ["ai"]

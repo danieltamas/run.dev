@@ -32,7 +32,7 @@ use core::config::load_all_projects;
 use core::hosts::{is_helper_current, HELPER_PATH, HELPER_SCRIPT};
 
 #[derive(Parser)]
-#[command(name = "rundev", about = "AI-native local dev environment", version = "0.3.0")]
+#[command(name = "rundev", about = "AI-native local dev environment", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -237,6 +237,24 @@ fn cmd_doctor() {
     let port_1111 = std::net::TcpListener::bind("127.0.0.1:1111").is_ok();
     println!("port 80:   {}", if port_80 { "✅ available" } else { "⚠️  in use" });
     println!("port 1111: {}", if port_1111 { "✅ available" } else { "⚠️  in use" });
+
+    // Is the 80→1111 redirect actually routing to our listener? This catches the
+    // "proxy shows running but domains stop resolving" failure: pf/iptables rules
+    // go stale (sleep/wake on macOS, Docker/firewalld on Linux). A loopback connect
+    // to :80 follows the same redirect path the browser does.
+    let redirect_ok = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], 80)),
+        std::time::Duration::from_millis(500),
+    )
+    .is_ok();
+    println!(
+        "redirect:  {}",
+        if redirect_ok {
+            "✅ :80 → :1111 routing (rundev reachable)"
+        } else {
+            "⚠️  :80 not routed — if rundev is running, the redirect went stale (restart or run `rundev setup`)"
+        }
+    );
 
     let config_dir = core::config::projects_dir();
     let projects = load_all_projects();

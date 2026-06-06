@@ -111,6 +111,10 @@ main.rs: parse CLI (clap)
             │     ├── kill_orphaned_pids() from state.json
             │     ├── activate_port_forwarding() — pfctl/iptables (80→1111, 443→1112)
             │     ├── start HTTP proxy (:1111) and HTTPS proxy (:1112)
+            │     ├── spawn self-heal task — probe :80 every 5s; re-apply port
+            │     │     forwarding if the redirect went stale (sleep/wake on macOS,
+            │     │     Docker/firewalld reload on Linux). Keeps domains reachable
+            │     │     without a restart; drives the dashboard's proxy health.
             │     └── init ResourceMonitor
             │
             ├── tui::init() — raw mode, alternate screen, mouse capture
@@ -202,6 +206,24 @@ Browser: http://win.wam.app/path
 ```
 
 Debug: `curl http://localhost:1111/__run` prints the live proxy route table.
+
+#### Redirect self-heal (reliability)
+
+The `pfctl`/`iptables` redirect (`80→1111`, `443→1112`) is the fragile link: macOS
+silently drops pf rules across sleep/wake, and on Linux Docker/firewalld rewrite the
+`nat` table out from under us. When that happens the listeners stay bound — so the
+dashboard *looks* healthy — but browser traffic never reaches them and every domain
+fails until the process is restarted. To prevent that, `run_app` spawns a self-heal
+task that probes `127.0.0.1:80` every 5s (the same loopback redirect path the browser
+takes) and re-applies port forwarding *only when the probe fails*. Probe-then-reapply
+keeps it from spamming `sudo` or needlessly flushing other tools' `nat` rules in the
+common case. The shared reachability flag also drives `proxy_running`, so the dashboard
+shows a transient warning in the error bar while a stale redirect is being re-applied.
+
+Connection hygiene: every proxied read (request headers, response headers, both copy
+directions, WebSocket frames) is bounded by a 5-minute idle timeout, and concurrent
+connections are capped by a 512-permit semaphore. Together these stop a silent or
+half-dead upstream from pinning a permit + FDs forever and exhausting the budget.
 
 ### Process Lifecycle
 
@@ -497,7 +519,7 @@ Port inference: command flags → `.env PORT=` → `package.json proxy` → fram
 
 ## Project Status
 
-- **Version**: 0.3.1 (early alpha)
+- **Version**: 0.3.2 (early alpha)
 - **Edition**: Rust 2021
 - **Platforms**: macOS (pfctl) and Linux (iptables)
 - **Tests**: Unit tests in config.rs, hosts.rs, resources.rs
