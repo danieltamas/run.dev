@@ -1,3 +1,4 @@
+pub mod clipboard;
 pub mod config;
 pub mod hosts;
 pub mod preload;
@@ -6,3 +7,4 @@ pub mod proxy;
 pub mod resources;
 pub mod scanner;
 pub mod ssl;
+pub mod text;

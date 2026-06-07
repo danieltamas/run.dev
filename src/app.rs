@@ -13,9 +13,10 @@
 
 use anyhow::Result;
 use crossterm::event::{
-    Event, EventStream, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind,
+    Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use futures::StreamExt;
+use ratatui::layout::Rect;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -140,6 +141,57 @@ pub struct RowInfo {
     pub service_idx: Option<usize>,
 }
 
+// ── Log-panel text selection ───────────────────────────────────────────────────
+
+/// A drag-selection inside the log panel.
+///
+/// run.dev captures the mouse (so the terminal can't do native selection), so we
+/// implement selection ourselves: coordinates are `(row, col)` *relative to the
+/// log panel's inner text area*, where `row` indexes into
+/// [`AppState::log_visible_lines`]. Both endpoints are inclusive of the cell
+/// under the pointer, matching how a normal text selection feels.
+#[derive(Clone, Copy)]
+pub struct LogSelection {
+    /// Where the drag started.
+    pub anchor: (u16, u16),
+    /// Current (or final) drag position.
+    pub cursor: (u16, u16),
+    /// True while the mouse button is held down (drag in progress).
+    pub active: bool,
+}
+
+impl LogSelection {
+    /// Endpoints ordered top-to-bottom in reading order. `(u16, u16)` compares
+    /// lexicographically, which is exactly row-major.
+    fn ordered(&self) -> ((u16, u16), (u16, u16)) {
+        if self.anchor <= self.cursor {
+            (self.anchor, self.cursor)
+        } else {
+            (self.cursor, self.anchor)
+        }
+    }
+
+    /// True when the selection collapses to a single cell (a click, not a drag).
+    pub fn is_empty(&self) -> bool {
+        self.anchor == self.cursor
+    }
+
+    /// Char range `[start, end)` selected on visible `row` whose text is
+    /// `line_len` chars long. `None` if the row falls outside the selection.
+    pub fn range_for_row(&self, row: u16, line_len: usize) -> Option<(usize, usize)> {
+        let ((tr, tc), (br, bc)) = self.ordered();
+        if row < tr || row > br {
+            return None;
+        }
+        let start = if row == tr { tc as usize } else { 0 };
+        // Inclusive end cell → exclusive index. Interior rows run to end-of-line.
+        let end_incl = if row == br { bc as usize } else { line_len.saturating_sub(1) };
+        let start = start.min(line_len);
+        let end = (end_incl + 1).min(line_len).max(start);
+        Some((start, end))
+    }
+}
+
 // ── Project/service views ──────────────────────────────────────────────────────
 
 pub struct ProjectView {
@@ -162,6 +214,18 @@ pub struct AppState {
     pub selected_service: Option<usize>,
     pub log_panel_open: bool,
     pub log_scroll: usize,
+    /// Screen rect of the log panel (including its border), stored each render so
+    /// mouse handlers can map pointer coordinates to log lines. `None` when the
+    /// panel is closed. The text area is this minus the 1-cell border
+    /// ([`inner_text_area`]).
+    pub log_panel_area: Option<Rect>,
+    /// The wrapped, ANSI-stripped lines currently shown in the log panel, stored
+    /// each render so a drag-selection can be turned into copied text. Index =
+    /// row within the inner text area.
+    pub log_visible_lines: Vec<String>,
+    /// Active or last text selection in the log panel. `None` when nothing is
+    /// selected.
+    pub log_selection: Option<LogSelection>,
     pub command_focused: bool,
     pub command_input: String,
     pub run_message: Option<String>,
@@ -190,6 +254,9 @@ impl AppState {
             selected_service: None,
             log_panel_open: false,
             log_scroll: 0,
+            log_panel_area: None,
+            log_visible_lines: vec![],
+            log_selection: None,
             command_focused: false,
             command_input: String::new(),
             run_message: None,
@@ -285,6 +352,27 @@ impl AppState {
         let proj = self.projects.get(self.selected_project)?;
         let idx = self.selected_service.unwrap_or(0);
         proj.shared.get(idx).cloned()
+    }
+
+    /// The full log buffer of the service the log panel is showing, ANSI-stripped
+    /// and joined into one pasteable string, plus that service's title. Mirrors
+    /// the panel's selection logic (`selected_service`, falling back to the first
+    /// service) so `[c]` copies exactly what the panel renders. `None` when there
+    /// is no service or no output yet.
+    pub fn selected_logs_for_copy(&self) -> Option<(String, String)> {
+        let proj = self.projects.get(self.selected_project)?;
+        let idx = self.selected_service.unwrap_or(0);
+        let proc = proj.processes.get(idx)?;
+        if proc.combined_log.is_empty() {
+            return None;
+        }
+        let body = proc
+            .combined_log
+            .iter()
+            .map(|l| crate::core::text::strip_ansi(l))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some((proc.id.clone(), body))
     }
 
     pub fn handle_click(&mut self, row: u16, _col: u16) {
@@ -1625,7 +1713,18 @@ async fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         KeyCode::Char('p') => pause_selected(state).await,
         KeyCode::Char('x') => stop_selected(state).await,
         KeyCode::Char('r') => restart_selected(state).await,
-        KeyCode::Char('l') => { state.log_panel_open = !state.log_panel_open; state.log_scroll = 0; }
+        KeyCode::Char('l') => {
+            state.log_panel_open = !state.log_panel_open;
+            state.log_scroll = 0;
+            state.log_selection = None;
+        }
+        // Copy the selected service's full log buffer. Guarded so Ctrl+C (which
+        // crossterm delivers as Char('c') in raw mode) is left as a no-op.
+        KeyCode::Char('c') | KeyCode::Char('y')
+            if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            copy_all_logs(state);
+        }
         KeyCode::Char('t') => {
             if let Some(proc) = state.selected_service_proc() {
                 state.shell_out_request = Some(ShellOutRequest {
@@ -1637,10 +1736,12 @@ async fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char('f') => fix_selected(state).await,
         KeyCode::Char('/') => { state.command_focused = true; state.command_input.clear(); }
-        KeyCode::Tab => state.log_panel_open = !state.log_panel_open,
+        KeyCode::Tab => { state.log_panel_open = !state.log_panel_open; state.log_selection = None; }
         KeyCode::Esc => {
             if state.error_message.is_some() {
                 state.error_message = None;
+            } else if state.log_selection.is_some() {
+                state.log_selection = None;
             } else {
                 state.selected_service = None;
                 state.log_panel_open = false;
@@ -1721,18 +1822,175 @@ fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
     match mouse.kind {
         MouseEventKind::ScrollDown => {
             // Scroll down = newer lines = decrease offset from bottom
-            if state.log_panel_open { state.log_scroll = state.log_scroll.saturating_sub(3); }
-            else { navigate_down(state); }
+            if state.log_panel_open {
+                state.log_scroll = state.log_scroll.saturating_sub(3);
+                state.log_selection = None; // row coords are stale once we scroll
+            } else {
+                navigate_down(state);
+            }
         }
         MouseEventKind::ScrollUp => {
             // Scroll up = older lines = increase offset from bottom
-            if state.log_panel_open { state.log_scroll = state.log_scroll.saturating_add(3); }
-            else { navigate_up(state); }
+            if state.log_panel_open {
+                state.log_scroll = state.log_scroll.saturating_add(3);
+                state.log_selection = None;
+            } else {
+                navigate_up(state);
+            }
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            state.handle_click(mouse.row, mouse.column);
+            // A press inside the log panel's text area begins a drag-selection.
+            // Anywhere else is a normal dashboard click (and clears any
+            // highlight). A press on the panel border just clears — it must not
+            // fall through to handle_click and grab a dashboard row at this y.
+            if let Some((row, col)) = state.log_panel_pos(mouse.column, mouse.row) {
+                state.log_selection = Some(LogSelection {
+                    anchor: (row, col),
+                    cursor: (row, col),
+                    active: true,
+                });
+            } else if state.over_log_panel(mouse.column) {
+                state.log_selection = None;
+            } else {
+                state.log_selection = None;
+                state.handle_click(mouse.row, mouse.column);
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            // Extend the selection. Clamp to the text area so dragging past the
+            // panel edges keeps selecting the nearest line/column.
+            if let Some(area) = state.log_panel_area {
+                let inner = inner_text_area(area);
+                if let Some(sel) = state.log_selection.as_mut() {
+                    if sel.active {
+                        sel.cursor = clamp_to_inner(inner, mouse.column, mouse.row);
+                    }
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            finish_log_selection(state);
         }
         _ => {}
+    }
+}
+
+/// The text area of a bordered panel — the rect minus its 1-cell frame.
+pub fn inner_text_area(a: Rect) -> Rect {
+    Rect {
+        x: a.x.saturating_add(1),
+        y: a.y.saturating_add(1),
+        width: a.width.saturating_sub(2),
+        height: a.height.saturating_sub(2),
+    }
+}
+
+/// Clamp an absolute `(col, row)` to `inner` and return it relative to `inner`
+/// as `(row, col)`. Used so a drag that strays outside the panel still resolves
+/// to the nearest selectable cell.
+fn clamp_to_inner(inner: Rect, col: u16, row: u16) -> (u16, u16) {
+    if inner.width == 0 || inner.height == 0 {
+        return (0, 0);
+    }
+    let c = col.clamp(inner.x, inner.x + inner.width - 1) - inner.x;
+    let r = row.clamp(inner.y, inner.y + inner.height - 1) - inner.y;
+    (r, c)
+}
+
+impl AppState {
+    /// True when `col` falls within the log panel's horizontal span (border
+    /// included) and the panel is open.
+    fn over_log_panel(&self, col: u16) -> bool {
+        self.log_panel_open
+            && self
+                .log_panel_area
+                .is_some_and(|a| col >= a.x && col < a.x + a.width)
+    }
+
+    /// Map an absolute pointer `(col, row)` to a `(row, col)` position inside the
+    /// log panel's text area, or `None` if it isn't over the text area.
+    fn log_panel_pos(&self, col: u16, row: u16) -> Option<(u16, u16)> {
+        if !self.log_panel_open {
+            return None;
+        }
+        let inner = inner_text_area(self.log_panel_area?);
+        if col >= inner.x
+            && col < inner.x + inner.width
+            && row >= inner.y
+            && row < inner.y + inner.height
+        {
+            Some((row - inner.y, col - inner.x))
+        } else {
+            None
+        }
+    }
+}
+
+/// Finish a drag-selection on mouse-up: copy the highlighted text to the
+/// clipboard, or clear the highlight if it was just a click (no drag).
+fn finish_log_selection(state: &mut AppState) {
+    let sel = match state.log_selection {
+        Some(s) => s,
+        None => return,
+    };
+    // Mark the selection settled so it stays highlighted after release.
+    if let Some(s) = state.log_selection.as_mut() {
+        s.active = false;
+    }
+    // A click without a drag isn't a copy — just clear the highlight.
+    if sel.is_empty() {
+        state.log_selection = None;
+        return;
+    }
+    let text = extract_log_selection(state);
+    if text.trim().is_empty() {
+        state.log_selection = None;
+        return;
+    }
+    copy_to_clipboard_with_feedback(state, &text, "selection");
+}
+
+/// Pull the selected substring out of the visible log lines and join the rows.
+fn extract_log_selection(state: &AppState) -> String {
+    let sel = match state.log_selection {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for (i, line) in state.log_visible_lines.iter().enumerate() {
+        let chars: Vec<char> = line.chars().collect();
+        if let Some((start, end)) = sel.range_for_row(i as u16, chars.len()) {
+            parts.push(chars[start..end].iter().collect());
+        }
+    }
+    // Trim a single trailing newline from a selection that ends on a blank row.
+    parts.join("\n").trim_end_matches('\n').to_string()
+}
+
+/// Copy `state`'s whole visible-service log buffer to the clipboard. Bound to
+/// `[c]`/`[y]` — reaches the full ring buffer, not just the visible window a
+/// drag-selection can cover.
+fn copy_all_logs(state: &mut AppState) {
+    match state.selected_logs_for_copy() {
+        Some((_title, body)) => copy_to_clipboard_with_feedback(state, &body, "all logs"),
+        None => {
+            state.run_message = Some("no logs to copy — select a service first".to_string());
+        }
+    }
+}
+
+/// Shared clipboard write + user feedback. `what` describes the payload for the
+/// status line ("selection" / "all logs").
+fn copy_to_clipboard_with_feedback(state: &mut AppState, text: &str, what: &str) {
+    let lines = text.lines().count().max(1);
+    match crate::core::clipboard::copy_to_clipboard(text) {
+        Ok(_) => {
+            let noun = if lines == 1 { "line" } else { "lines" };
+            state.run_message = Some(format!("copied {lines} {noun} ({what}) to clipboard"));
+        }
+        Err(e) => {
+            state.error_message = Some(format!("copy failed: {e}"));
+        }
     }
 }
 
@@ -2042,6 +2300,58 @@ fn autocomplete_path(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── LogSelection::range_for_row ──────────────────────────────────────────
+
+    fn sel(anchor: (u16, u16), cursor: (u16, u16)) -> LogSelection {
+        LogSelection { anchor, cursor, active: false }
+    }
+
+    #[test]
+    fn selection_single_row_forward() {
+        let s = sel((0, 2), (0, 5));
+        assert_eq!(s.range_for_row(0, 10), Some((2, 6))); // end cell is inclusive
+        assert_eq!(s.range_for_row(1, 10), None);
+    }
+
+    #[test]
+    fn selection_single_cell_is_empty_but_one_char() {
+        let s = sel((1, 3), (1, 3));
+        assert!(s.is_empty());
+        assert_eq!(s.range_for_row(1, 10), Some((3, 4)));
+    }
+
+    #[test]
+    fn selection_spans_multiple_rows() {
+        let s = sel((1, 4), (3, 2));
+        assert_eq!(s.range_for_row(0, 10), None); // above selection
+        assert_eq!(s.range_for_row(1, 10), Some((4, 10))); // top: from anchor to EOL
+        assert_eq!(s.range_for_row(2, 10), Some((0, 10))); // middle: whole line
+        assert_eq!(s.range_for_row(3, 10), Some((0, 3))); // bottom: to cursor
+        assert_eq!(s.range_for_row(4, 10), None); // below selection
+    }
+
+    #[test]
+    fn selection_reversed_drag_matches_forward() {
+        // Dragging up/left must select the same cells as dragging down/right.
+        let down = sel((1, 4), (3, 2));
+        let up = sel((3, 2), (1, 4));
+        for row in 0..5 {
+            assert_eq!(up.range_for_row(row, 10), down.range_for_row(row, 10));
+        }
+    }
+
+    #[test]
+    fn selection_clamps_past_end_of_line() {
+        let s = sel((0, 2), (0, 8));
+        assert_eq!(s.range_for_row(0, 5), Some((2, 5))); // clamped to line length
+    }
+
+    #[test]
+    fn selection_on_blank_line_is_empty_range() {
+        let s = sel((0, 0), (2, 3));
+        assert_eq!(s.range_for_row(1, 0), Some((0, 0))); // blank middle row
+    }
 
     // ── wrap_command_with_nvm ────────────────────────────────────────────────
 

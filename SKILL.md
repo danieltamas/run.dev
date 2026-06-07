@@ -15,7 +15,7 @@
 - **Author**: Daniel Tamas <hello@danieltamas.com>
 - **Website**: https://getrun.dev
 - **Source**: https://github.com/danieltamas/run.dev
-- **Version**: 0.3.2
+- **Version**: 0.3.3
 - **Released**: 2026-06-06
 
 ---
@@ -126,11 +126,13 @@ rundev uninstall            # Reverse all system changes
 | `t` | Open shell at service directory |
 | `f` | Auto-fix crashed service (kill port, restart, etc.) |
 | `l` | Toggle log panel |
+| `c` / `y` | Copy the selected service's logs to the clipboard |
 | `/` | Ask Claude a question about your services |
 | `q` | Quit (services keep running in background) |
 | `Q` | Quit and stop all services |
 
-Mouse support: click to select, scroll to navigate.
+Mouse support: click to select, scroll to navigate, drag inside the log panel to
+select log text (copied to clipboard on release).
 
 ---
 

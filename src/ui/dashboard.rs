@@ -234,7 +234,7 @@ fn render_banner(f: &mut Frame, area: Rect, state: &AppState) {
         right[4],
     );
     f.render_widget(
-        Paragraph::new("[r] restart  [l] logs  [t] shell").style(dim),
+        Paragraph::new("[r] restart  [l] logs  [c] copy  [t] shell").style(dim),
         right[5],
     );
     f.render_widget(

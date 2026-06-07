@@ -445,27 +445,123 @@ pub async fn restart_process(proc: SharedProcess) -> Result<()> {
     spawn_process(proc).await
 }
 
+/// Stop a managed service **and its entire descendant tree**.
+///
+/// Services are spawned as process-group leaders (`process_group(0)`), so a
+/// single command like `turbo dev` / `bun dev` fans out into many child dev
+/// servers — each binding its own port — that all share the leader's process
+/// group. We must reap the *whole group*, not just the leader: SIGTERM the
+/// group, wait for **every** member to exit, then SIGKILL the group as a safety
+/// net. Children that detached from the group via `setsid()` are swept up from a
+/// pre-kill snapshot of the process tree.
+///
+/// The previous version returned as soon as the *leader* died, so stubborn child
+/// dev servers (e.g. Vite apps in a Turborepo) were left orphaned and kept
+/// holding their ports after run.dev exited. See the "subsystem ports" SOP.
 async fn kill_pid(pid: u32) {
-    // Try process-group kill first (catches npm→node child trees), fall back
-    // to single-pid if the group doesn't exist.
-    let pgid = -(pid as i32);
-    let ret = unsafe { libc::kill(pgid, libc::SIGTERM) };
-    if ret != 0 {
-        // Process group kill failed — kill the single process instead
+    if pid <= 1 {
+        return; // never signal pid 0/1 or a whole-session group
+    }
+
+    // Snapshot the tree before we start signalling, so we can still find any
+    // child that detaches from the process group as it shuts down.
+    let descendants = collect_descendants(pid).await;
+
+    let group = -(pid as i32);
+    let group_ok = unsafe { libc::kill(group, libc::SIGTERM) } == 0;
+    if !group_ok {
+        // No group (already partly reaped) — at least signal the leader.
         unsafe { libc::kill(pid as i32, libc::SIGTERM) };
     }
 
+    // Wait for the ENTIRE group (plus any snapshotted escapees) to exit — not
+    // just the leader. This is the fix for hanging subsystem ports.
+    let mut drained = false;
     for _ in 0..50 {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        if !pid_exists(pid) {
-            return;
+        if !tree_alive(pid, &descendants) {
+            drained = true;
+            break;
         }
     }
 
-    let ret = unsafe { libc::kill(pgid, libc::SIGKILL) };
-    if ret != 0 {
-        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    if !drained {
+        // Escalate: SIGKILL the whole group, then any escapees directly.
+        if group_ok {
+            unsafe { libc::kill(group, libc::SIGKILL) };
+        } else {
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+        for &child in &descendants {
+            if pid_exists(child) {
+                unsafe { libc::kill(child as i32, libc::SIGKILL) };
+            }
+        }
+        // Brief settle so a caller that re-binds the port doesn't race a
+        // straggler that's still on its way out.
+        for _ in 0..20 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            if !tree_alive(pid, &descendants) {
+                break;
+            }
+        }
     }
+}
+
+/// True while any member of `leader`'s process group, or any snapshotted
+/// descendant, is still alive.
+fn tree_alive(leader: u32, descendants: &[u32]) -> bool {
+    // `kill(-pgid, 0)` succeeds while the group has ≥1 live member, even after
+    // the group leader itself has exited (the group outlives its leader).
+    if unsafe { libc::kill(-(leader as i32), 0) } == 0 {
+        return true;
+    }
+    descendants.iter().any(|&p| pid_exists(p))
+}
+
+/// Best-effort list of every transitive child PID of `root` (excluding `root`),
+/// captured from `ps`. Catches grandchildren that left the process group.
+async fn collect_descendants(root: u32) -> Vec<u32> {
+    let output = tokio::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output()
+        .await;
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let pairs: Vec<(u32, u32)> = text
+        .lines()
+        .filter_map(|line| {
+            let mut it = line.split_whitespace();
+            let pid = it.next()?.parse::<u32>().ok()?;
+            let ppid = it.next()?.parse::<u32>().ok()?;
+            Some((pid, ppid))
+        })
+        .collect();
+    descendants_from_pairs(&pairs, root)
+}
+
+/// Pure tree walk: given `(pid, ppid)` pairs, return every transitive descendant
+/// of `root` (excluding `root`). No duplicates; tolerant of cycles.
+fn descendants_from_pairs(pairs: &[(u32, u32)], root: u32) -> Vec<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for &(pid, ppid) in pairs {
+        children.entry(ppid).or_default().push(pid);
+    }
+    let mut out: Vec<u32> = Vec::new();
+    let mut stack = vec![root];
+    while let Some(p) = stack.pop() {
+        if let Some(kids) = children.get(&p) {
+            for &k in kids {
+                if k != root && !out.contains(&k) {
+                    out.push(k);
+                    stack.push(k);
+                }
+            }
+        }
+    }
+    out
 }
 
 pub fn pid_exists(pid: u32) -> bool {
@@ -643,6 +739,37 @@ fn cloak_export(working_dir: &std::path::Path) -> Result<HashMap<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── descendants_from_pairs (process-tree teardown) ───────────────────────
+
+    #[test]
+    fn descendants_walks_full_tree() {
+        // 100 ─┬─ 200 ── 300
+        //      └─ 201
+        // 999 is unrelated (child of init).
+        let pairs = vec![(200, 100), (201, 100), (300, 200), (999, 1)];
+        let mut d = descendants_from_pairs(&pairs, 100);
+        d.sort();
+        assert_eq!(d, vec![200, 201, 300]);
+    }
+
+    #[test]
+    fn descendants_excludes_root_and_unrelated() {
+        let pairs = vec![(2, 1), (3, 2)];
+        // Root not in the table → no descendants.
+        assert!(descendants_from_pairs(&pairs, 100).is_empty());
+        // Root itself is never included.
+        assert!(!descendants_from_pairs(&pairs, 1).contains(&1));
+    }
+
+    #[test]
+    fn descendants_tolerates_cycles() {
+        // Pathological self/loop parents must not infinite-loop.
+        let pairs = vec![(5, 5), (6, 5), (5, 6)];
+        let d = descendants_from_pairs(&pairs, 5);
+        assert!(d.contains(&6));
+        assert!(!d.contains(&5)); // root excluded even though it self-parents
+    }
 
     fn make_proc(id: &str) -> ManagedProcess {
         ManagedProcess::new(

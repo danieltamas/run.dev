@@ -168,7 +168,12 @@ Domains live at the **service level**, not the project level. Each service indep
 [x] stop service
     ├── proc.proxied = false
     ├── update_hosts_for_state() — removes domain from /etc/hosts
-    └── kill process (SIGTERM → SIGKILL)
+    └── kill the whole process *group* (SIGTERM → wait for the group to
+        drain → SIGKILL), then sweep any setsid() escapees from a pre-kill
+        process-tree snapshot, then kill_port() the known port.
+        Services spawn with process_group(0); a command like `turbo dev`
+        fans out into many child dev servers on their own ports, so reaping
+        only the leader would leave those subsystem ports hanging.
 
 [s] start again
     ├── ensure_ssl(domain) — cert already exists, skipped
@@ -491,13 +496,18 @@ rundev logs [target]      # Hints to use TUI instead
 | `t` | Open `$SHELL` at service working dir (TUI suspends, resumes on exit) |
 | `f` | Execute auto-fix for crashed service |
 | `l` | Toggle log panel (j/k or scroll wheel scrolls; newest lines at bottom) |
+| `c` / `y` | Copy the selected service's full log buffer to the clipboard |
 | `/` | Focus command bar (ask Claude a question) |
 | `Tab` | Cycle panels |
-| `Esc` | Cancel/deselect/close |
+| `Esc` | Clear log selection, else cancel/deselect/close |
 | `q` | Quit TUI (services keep running) |
 | `Q` | Quit and stop all services |
 
 Mouse: click rows to select/expand, scroll wheel scrolls logs or navigates list.
+Drag inside the log panel to select log text — since the TUI captures the mouse,
+the selection is rendered by `ui::logs` from a `LogSelection` the controller
+records from drag events, and the highlighted text is copied to the clipboard on
+release (`core::clipboard`). `[c]`/`[y]` copy the entire ring buffer.
 
 ---
 
@@ -519,7 +529,7 @@ Port inference: command flags → `.env PORT=` → `package.json proxy` → fram
 
 ## Project Status
 
-- **Version**: 0.3.2 (early alpha)
+- **Version**: 0.3.3 (early alpha)
 - **Edition**: Rust 2021
 - **Platforms**: macOS (pfctl) and Linux (iptables)
 - **Tests**: Unit tests in config.rs, hosts.rs, resources.rs

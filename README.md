@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2021-orange?style=flat-square&logo=rust" alt="Rust 2021" />
-  <img src="https://img.shields.io/badge/version-0.3.2-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.3-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/AI-Claude%20powered-blueviolet?style=flat-square" alt="AI Powered" />
@@ -45,7 +45,7 @@ Run.dev is a single Rust binary that replaces all of that. It gives you:
   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝  ╚═════╝ ╚══════╝  ╚═══╝       [/] ask the AI anything
 
   Daniel Tamas
-  hello@danieltamas.com                                       2 projects  configured  v0.3.2
+  hello@danieltamas.com                                       2 projects  configured  v0.3.3
 
   projects ────────────────────────────────────────────────────────────────────────
           service                            url                       local           mem   cpu
@@ -164,11 +164,12 @@ rundev setup              # Re-install privileged helper + port forwarding
 | `r` | Restart selected service |
 | `f` | Auto-fix crashed service |
 | `l` | Toggle log panel |
+| `c` / `y` | Copy the selected service's logs to the clipboard |
 | `/` | Ask Claude a question |
 | `q` | Quit (services keep running) |
 | `Q` | Quit and stop everything |
 
-Mouse works too. Click things. Scroll things. It's 2026.
+Mouse works too. Click things. Scroll things. **Drag inside the log panel to select log text** — it's copied to your clipboard on release. It's 2026.
 
 ## Project Detection
 
