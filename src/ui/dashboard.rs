@@ -40,13 +40,17 @@ pub fn render_dashboard(f: &mut Frame, area: Rect, state: &mut AppState) {
     // Always use a stable 4-slot layout. The error bar slot is always reserved
     // (1 line) so the layout never changes shape — zero-length constraints in
     // ratatui can corrupt coordinate calculations for subsequent chunks.
+    // The command bar grows to fit a long question while typing, and a long AI
+    // answer while one is shown, so neither is clipped to a single line. Still a
+    // stable 4-slot layout (never zero-length) — just a variable last slot.
+    let cmd_height = command_bar_height(state, area.width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(BANNER_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(1), // Error bar (blank when no error)
-            Constraint::Length(2), // AI command bar
+            Constraint::Length(cmd_height), // AI command bar (grows on input/answer)
         ])
         .split(area);
 
@@ -578,6 +582,30 @@ fn render_projects(f: &mut Frame, area: Rect, state: &mut AppState) {
 
 // ── Command bar ────────────────────────────────────────────────────────────────
 
+/// Rows the AI command bar needs. Grows while typing (to show the full wrapped
+/// question) and while an answer/status is shown (to show the wrapped reply), so
+/// neither is clipped to one line. Clamped so it never starves the project list,
+/// and never below 2 (the stable-layout minimum).
+fn command_bar_height(state: &AppState, width: u16) -> u16 {
+    let w = (width as usize).max(1);
+    let wrapped_rows = |len: usize| len.saturating_add(w - 1) / w; // ceil(len/w)
+
+    if state.command_focused {
+        // "🧠 > " prompt (~4 cols) + input + "_" cursor.
+        let rows = wrapped_rows(4 + state.command_input.chars().count() + 1).max(1);
+        (rows as u16).clamp(2, 8)
+    } else if let Some(msg) = &state.run_message {
+        // "🧠 " + reply, wrapped; capped so a long answer doesn't eat the screen.
+        let rows: usize = msg
+            .lines()
+            .map(|l| wrapped_rows(2 + l.chars().count()).max(1))
+            .sum();
+        (rows as u16).clamp(2, 12)
+    } else {
+        2
+    }
+}
+
 fn render_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let content = if state.command_focused {
         format!("🧠 > {}_", state.command_input)
@@ -593,7 +621,20 @@ fn render_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
         Style::default().fg(Color::DarkGray)
     };
 
-    f.render_widget(Paragraph::new(content).style(style), area);
+    let mut para = Paragraph::new(content).style(style).wrap(Wrap { trim: false });
+
+    // While typing, keep the cursor (end of input) on screen if it overflows the
+    // grown area — scroll so the last wrapped row is visible.
+    if state.command_focused {
+        let w = (area.width as usize).max(1);
+        let total = (4 + state.command_input.chars().count() + 1).saturating_add(w - 1) / w;
+        let visible = area.height as usize;
+        if total > visible {
+            para = para.scroll(((total - visible) as u16, 0));
+        }
+    }
+
+    f.render_widget(para, area);
 }
 
 // ── URL building ───────────────────────────────────────────────────────────────

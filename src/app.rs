@@ -1740,6 +1740,8 @@ async fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         KeyCode::Esc => {
             if state.error_message.is_some() {
                 state.error_message = None;
+            } else if state.run_message.is_some() {
+                state.run_message = None; // dismiss an AI answer / status line
             } else if state.log_selection.is_some() {
                 state.log_selection = None;
             } else {
@@ -2225,11 +2227,83 @@ async fn fix_selected(state: &mut AppState) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/// Build the context blob sent to Claude with a `/` question. Includes a status
+/// line per service PLUS recent logs — without the logs Claude can only see the
+/// status line and can't answer "why did X crash?" (the whole point). Focuses on
+/// the service the user is looking at, and always appends the stderr tail of any
+/// crashed service.
 fn build_context(state: &AppState) -> String {
-    state.projects.iter()
-        .flat_map(|pv| pv.processes.iter().map(|p| {
-            format!("{}: {} (port {}, {})", p.id, p.status.label(), p.port, p.command)
-        }))
+    let mut out = String::new();
+
+    out.push_str("Services (status):\n");
+    for pv in &state.projects {
+        for p in &pv.processes {
+            out.push_str(&format!(
+                "- {}: {} (port {}, cmd: {})\n",
+                p.id, p.status.label(), p.port, p.command
+            ));
+        }
+    }
+
+    // The service the user is currently looking at (mirrors the log panel).
+    let selected = state
+        .projects
+        .get(state.selected_project)
+        .and_then(|pv| pv.processes.get(state.selected_service.unwrap_or(0)));
+
+    if let Some(p) = selected {
+        let tail = recent_log_tail(p, 60);
+        if !tail.is_empty() {
+            out.push_str(&format!(
+                "\nRecent logs for {} ({}, last 60 lines):\n{}\n",
+                p.id,
+                p.status.label(),
+                tail
+            ));
+        }
+    }
+
+    // Crash details for any crashed service not already covered above.
+    let selected_id = selected.map(|p| p.id.as_str());
+    for pv in &state.projects {
+        for p in &pv.processes {
+            if Some(p.id.as_str()) == selected_id {
+                continue; // its fuller log is already included above
+            }
+            if let ProcessStatus::Crashed { exit_code, stderr_tail } = &p.status {
+                out.push_str(&format!(
+                    "\n{} crashed (exit {}):\n{}\n",
+                    p.id,
+                    exit_code,
+                    stderr_tail.trim()
+                ));
+            }
+        }
+    }
+
+    // Safety cap so an enormous log can't blow up the prompt.
+    const MAX: usize = 16_000;
+    if out.len() > MAX {
+        let cut = out
+            .char_indices()
+            .take_while(|(i, _)| *i <= MAX)
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        out.truncate(cut);
+        out.push_str("\n…(truncated)");
+    }
+    out
+}
+
+/// Last `n` lines of a process's combined log, ANSI-stripped, for AI context.
+fn recent_log_tail(p: &ManagedProcess, n: usize) -> String {
+    let total = p.combined_log.len();
+    let start = total.saturating_sub(n);
+    p.combined_log
+        .iter()
+        .skip(start)
+        .map(|l| crate::core::text::strip_ansi(l))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -2300,6 +2374,37 @@ fn autocomplete_path(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── recent_log_tail (AI context) ─────────────────────────────────────────
+
+    #[test]
+    fn recent_log_tail_strips_ansi_and_takes_last_n() {
+        let mut p = ManagedProcess::new(
+            "proj/svc".to_string(),
+            "npm run dev".to_string(),
+            std::path::PathBuf::from("/tmp"),
+            5173,
+            HashMap::new(),
+        );
+        for i in 0..10 {
+            p.combined_log.push_back(format!("\x1b[31mline {}\x1b[0m", i));
+        }
+        // Last 3 lines, ANSI stripped — this is what the AI now receives.
+        assert_eq!(recent_log_tail(&p, 3), "line 7\nline 8\nline 9");
+    }
+
+    #[test]
+    fn recent_log_tail_handles_fewer_lines_than_requested() {
+        let mut p = ManagedProcess::new(
+            "p/s".to_string(),
+            "cmd".to_string(),
+            std::path::PathBuf::from("/tmp"),
+            0,
+            HashMap::new(),
+        );
+        p.combined_log.push_back("only line".to_string());
+        assert_eq!(recent_log_tail(&p, 60), "only line");
+    }
 
     // ── LogSelection::range_for_row ──────────────────────────────────────────
 
