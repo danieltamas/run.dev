@@ -15,7 +15,7 @@
 - **Author**: Daniel Tamas <hello@danieltamas.com>
 - **Website**: https://getrun.dev
 - **Source**: https://github.com/danieltamas/run.dev
-- **Version**: 0.3.4
+- **Version**: 0.3.6
 - **Released**: 2026-06-06
 
 ---

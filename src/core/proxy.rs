@@ -13,20 +13,27 @@ use rustls::ServerConfig;
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio_rustls::TlsAcceptor;
 
 /// Cap on concurrent proxied connections. Anything over this gets accepted
-/// and immediately dropped — better than blowing past the FD limit.
-const MAX_CONCURRENT_CONNS: usize = 512;
+/// and immediately dropped — a backstop against runaway concurrency. Each
+/// connection holds two FDs (client + upstream), so this stays comfortably under
+/// the raised FD limit (`raise_fd_limit()` in main lifts it to 65536).
+const MAX_CONCURRENT_CONNS: usize = 2048;
 
 /// Idle-read timeout. If neither side sends a byte for this long, the
 /// connection is torn down. Catches zombie sockets from Wi-Fi sleep,
 /// force-quits, or clients that vanish without sending FIN/RST.
 const IDLE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Live count of in-flight proxied connections, for the `/__run` diagnostic.
+/// Incremented when a connection task is spawned, decremented when it ends — so
+/// a steadily-climbing value that never falls is the signature of an FD leak.
+static ACTIVE_CONNS: AtomicUsize = AtomicUsize::new(0);
 
 pub struct ProxyRoute {
     pub domain: String,
@@ -90,7 +97,9 @@ pub async fn run_proxy(routes: RouteTable, listen_port: u16) -> Result<()> {
                     }
                 };
                 tokio::spawn(async move {
+                    ACTIVE_CONNS.fetch_add(1, Ordering::Relaxed);
                     let _ = handle_connection(stream, routes, false).await;
+                    ACTIVE_CONNS.fetch_sub(1, Ordering::Relaxed);
                     drop(permit);
                 });
             }
@@ -140,6 +149,7 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
                     }
                 };
                 tokio::spawn(async move {
+                    ACTIVE_CONNS.fetch_add(1, Ordering::Relaxed);
                     // Timeout the TLS handshake so bad clients don't hold connections forever
                     let tls_result = tokio::time::timeout(
                         std::time::Duration::from_secs(5),
@@ -149,6 +159,7 @@ pub async fn run_https_proxy(routes: RouteTable, listen_port: u16) -> Result<()>
                         Ok(Ok(tls_stream)) => { let _ = handle_connection(tls_stream, routes, true).await; }
                         _ => {} // TLS handshake failed or timed out — ignore
                     }
+                    ACTIVE_CONNS.fetch_sub(1, Ordering::Relaxed);
                     drop(permit);
                 });
             }
@@ -202,14 +213,24 @@ where
     if request.starts_with(b"GET /__run") {
         let body = {
             let table = routes.read().unwrap();
-            if table.is_empty() {
-                "run.dev proxy: no routes registered yet (services still starting?)\n".to_string()
+            let routes_str = if table.is_empty() {
+                "run.dev proxy: no routes registered yet (services still starting?)".to_string()
             } else {
                 let lines: Vec<String> = table.iter()
                     .map(|r| format!("  {} -> :{}", r.domain, r.target_port))
                     .collect();
-                format!("run.dev proxy routes:\n{}\n", lines.join("\n"))
-            }
+                format!("run.dev proxy routes:\n{}", lines.join("\n"))
+            };
+            // Diagnostics: a steadily-climbing "active" that never drops means an
+            // FD/connection leak; "active" near the cap or near the fd limit
+            // means you're about to get EMFILE.
+            format!(
+                "{}\n\nactive connections: {} / {}\nfd soft limit: {}\n",
+                routes_str,
+                ACTIVE_CONNS.load(Ordering::Relaxed),
+                MAX_CONCURRENT_CONNS,
+                current_fd_soft_limit(),
+            )
         };
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
@@ -328,8 +349,14 @@ where
 
         let ci = counter_in.clone();
         let co = counter_out.clone();
-        let _ = tokio::try_join!(
-            async {
+        // When EITHER direction ends (peer close, write error, or idle timeout),
+        // tear the whole connection down so the other half's FDs are released
+        // immediately. try_join! used to wait for BOTH directions — so when a
+        // browser closed an HMR WebSocket on refresh, the upstream half lingered
+        // (Vite keeps pinging) and leaked a client+upstream FD pair per refresh
+        // until the proxy hit EMFILE and every domain went dark.
+        tokio::select! {
+            _ = async {
                 let mut buf = vec![0u8; 65536];
                 loop {
                     match tokio::time::timeout(IDLE_READ_TIMEOUT, client_read.read(&mut buf)).await {
@@ -341,9 +368,8 @@ where
                         _ => break, // error or idle timeout
                     }
                 }
-                Ok::<_, std::io::Error>(())
-            },
-            async {
+            } => {}
+            _ = async {
                 let mut buf = vec![0u8; 65536];
                 loop {
                     match tokio::time::timeout(IDLE_READ_TIMEOUT, upstream_read.read(&mut buf)).await {
@@ -355,9 +381,8 @@ where
                         _ => break, // error or idle timeout
                     }
                 }
-                Ok::<_, std::io::Error>(())
-            },
-        );
+            } => {}
+        }
     } else {
         // ── Normal HTTP path ────────────────────────────────────────────────
         let request = inject_proxy_headers(request, is_tls, host.as_deref());
@@ -433,10 +458,39 @@ where
             Ok::<_, std::io::Error>(0u64)
         };
 
-        let _ = tokio::try_join!(fwd, resp);
+        // One response per socket (we force Connection: close both ways), so the
+        // transaction is over the instant `resp` finishes relaying the response.
+        // Don't keep waiting on `fwd`: after a Connection: close response the
+        // client can sit on the socket for up to IDLE_READ_TIMEOUT before
+        // closing, which would pin this task's client+upstream FD pair that whole
+        // time and leak descriptors under load (→ EMFILE → dead domains). Drive
+        // on `resp`; `fwd` runs concurrently only to stream an oversized request
+        // body, and is dropped (closing both sockets) once the response is out.
+        tokio::pin!(fwd);
+        tokio::pin!(resp);
+        let mut fwd_done = false;
+        loop {
+            tokio::select! {
+                _ = &mut resp => break,
+                _ = &mut fwd, if !fwd_done => { fwd_done = true; }
+            }
+        }
     }
 
     Ok(())
+}
+
+/// The process's current soft open-file limit (RLIMIT_NOFILE), for the `/__run`
+/// diagnostic.
+fn current_fd_soft_limit() -> u64 {
+    unsafe {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 {
+            lim.rlim_cur as u64
+        } else {
+            0
+        }
+    }
 }
 
 /// Detect WebSocket upgrade requests (Connection: Upgrade + Upgrade: websocket).
@@ -1071,6 +1125,53 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn handle_connection_releases_when_response_done_even_if_client_lingers() {
+        // Regression: the HTTP path used try_join!(fwd, resp) and waited for BOTH
+        // directions. After a Connection: close response, a client that holds its
+        // socket open (no FIN) pinned this connection's client+upstream FDs until
+        // IDLE_READ_TIMEOUT (300s) — an FD leak that, under refresh load, hit
+        // EMFILE ("Too many open files") and made every domain go dark until a
+        // restart. The fix drives on `resp`: the connection ends when the
+        // response is fully relayed, regardless of the lingering client.
+
+        // Upstream that replies in full, then closes.
+        let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = upstream.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut sock, _) = upstream.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = sock.read(&mut buf).await; // consume the proxied request
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi")
+                .await;
+            // Drop `sock` → upstream EOF → `resp` completes.
+        });
+
+        let table = new_route_table();
+        update_routes(&table, vec![route("app.local", port)]).await;
+
+        // Client that sends a request and then NEVER closes its socket.
+        let (client_side, mut test_side) = tokio::io::duplex(65536);
+        test_side
+            .write_all(b"GET / HTTP/1.1\r\nHost: app.local\r\n\r\n")
+            .await
+            .unwrap();
+
+        // Must return well before the 300s idle timeout — lingering would be the
+        // FD leak. (start_paused makes the old, broken behavior fail fast too.)
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            handle_connection(client_side, table, false),
+        )
+        .await;
+        assert!(
+            res.is_ok(),
+            "handle_connection lingered after the response was relayed (FD leak)"
+        );
+        drop(test_side); // keep the client socket open across the call above
+    }
+
     // ── inject_proxy_headers ────────────────────────────────────────────────
 
     #[test]
@@ -1279,13 +1380,65 @@ mod tests {
     }
 }
 
+const PROXY_LOG_PATH: &str = "/tmp/rundev-proxy.log";
+/// Rotate the proxy log once it passes this size, keeping one previous file
+/// (`<path>.1`). Caps disk use at ~2× this — the log used to grow without bound
+/// (it had reached 600k+ lines).
+const PROXY_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+struct ProxyLog {
+    file: Option<std::fs::File>,
+    written: u64,
+}
+
 fn proxy_log(msg: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true).append(true)
-        .open("/tmp/rundev-proxy.log")
-    {
-        let _ = writeln!(f, "[proxy] {}", msg);
+
+    // One shared handle behind a mutex: no FD churn per line (the old per-call
+    // open failed under FD pressure and interleaved concurrent writes), and a
+    // running byte count so we can rotate.
+    static STATE: std::sync::OnceLock<std::sync::Mutex<ProxyLog>> = std::sync::OnceLock::new();
+    let state = STATE.get_or_init(|| std::sync::Mutex::new(ProxyLog { file: None, written: 0 }));
+
+    // Logging must never panic or block the proxy.
+    let mut guard = match state.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(), // recover from a poisoned lock
+    };
+
+    // Open once; reuse the handle. Seed `written` from the existing file size.
+    if guard.file.is_none() {
+        match std::fs::OpenOptions::new().create(true).append(true).open(PROXY_LOG_PATH) {
+            Ok(f) => {
+                guard.written = f.metadata().map(|m| m.len()).unwrap_or(0);
+                guard.file = Some(f);
+            }
+            Err(_) => return, // can't open — drop the line
+        }
+    }
+
+    // Rotate when too big: move the current log to `<path>.1`, start fresh.
+    if guard.written >= PROXY_LOG_MAX_BYTES {
+        guard.file = None; // close before renaming
+        let _ = std::fs::rename(PROXY_LOG_PATH, format!("{PROXY_LOG_PATH}.1"));
+        match std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(PROXY_LOG_PATH) {
+            Ok(f) => {
+                guard.written = 0;
+                guard.file = Some(f);
+            }
+            Err(_) => {
+                guard.written = 0;
+                return;
+            }
+        }
+    }
+
+    // Disjoint field borrows (file vs. written) via a single &mut reborrow.
+    let st = &mut *guard;
+    if let Some(f) = st.file.as_mut() {
+        if writeln!(f, "[proxy] {msg}").is_ok() {
+            st.written += msg.len() as u64 + 9; // "[proxy] " (8) + "\n" (1)
+        }
     }
 }
 

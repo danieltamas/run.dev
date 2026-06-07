@@ -84,10 +84,46 @@ enum Commands {
     Setup,
 }
 
+/// Raise the process open-file limit so the reverse proxy doesn't exhaust file
+/// descriptors ("Too many open files" / EMFILE) under load.
+///
+/// macOS hands terminal- and GUI-launched processes a soft `RLIMIT_NOFILE` as
+/// low as 256, while a single dev page opens dozens of concurrent connections
+/// (Vite module graphs, HMR WebSockets) — across several apps that adds up fast,
+/// and the proxy holds a client+upstream FD pair per connection. Without this,
+/// FDs run out, `accept()` fails, and domains go dark until a restart. We bump
+/// the soft limit toward the hard limit (kernel cap `kern.maxfilesperproc`); no
+/// privileges needed. Best-effort — failures are non-fatal (the proxy also backs
+/// off on EMFILE).
+fn raise_fd_limit() {
+    unsafe {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        // Generous target, capped by the hard limit. macOS rejects
+        // RLIM_INFINITY for NOFILE, so never pass it through.
+        let cap: libc::rlim_t = 65536;
+        let target = if lim.rlim_max == libc::RLIM_INFINITY {
+            cap
+        } else {
+            lim.rlim_max.min(cap)
+        };
+        if lim.rlim_cur < target {
+            lim.rlim_cur = target;
+            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // rustls 0.23 requires an explicit CryptoProvider before any TLS usage.
     let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // Lift the open-file limit before the proxy starts — see fn docs. macOS's
+    // default soft limit (often 256) is far too low for multi-app dev traffic.
+    raise_fd_limit();
 
     let cli = Cli::parse();
 
