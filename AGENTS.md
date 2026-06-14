@@ -1,6 +1,6 @@
 # run.dev — AI-native local dev environment
 
-> Canonical rules (Git identity, workflow modes, safety trinity, default conventions) are inherited from [CANON](~/agent-os/CANON.md) and must not be duplicated here.
+> Canonical rules are inherited from your harness global agent config (CANON) and are not repeated here.
 
 Single Rust binary that replaces MAMP / nginx / docker-compose for local development. TUI dashboard, automatic `.local` domains with real HTTPS, SNI reverse proxy, process + resource monitoring, and optional Claude-powered crash diagnosis.
 
@@ -255,7 +255,7 @@ See `RELEASE_PROCEDURE.md` for the full checklist.
 
 - **Before grepping:** open `graphify-out/GRAPH_REPORT.md` god nodes and community hubs. Faster than reading files.
 - **Architecture questions:** `graph.html` is interactive — filter by community, trace bridges.
-- **After code changes:** run `/graphify --update` (or the watcher) to keep it current.
+- **After code changes:** run `/Users/danime/.local/pipx/venvs/graphifyy/bin/python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep it current. (graphify lives in the `graphifyy` pipx venv — plain `python3` does not have it.)
 
 Key bridge nodes (high betweenness): `Cli` (0.174), `AppState` (0.167), `load_state()` (0.114). If a change touches any of these, the graph will show every community affected — use it as a checklist for which files to sync.
 
