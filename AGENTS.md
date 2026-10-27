@@ -7,7 +7,7 @@ Single Rust binary that replaces MAMP / nginx / docker-compose for local develop
 - **Binary** — `rundev` (also symlinked as `run.dev`), ~9 MB, crate at repo root
 - **Platforms** — macOS (arm64/x86_64) and Linux (x86_64/aarch64). **No Windows** — not a supported target.
 - **Static site** — `index.html`, `llms.txt`, `SKILL.md`, `install.sh`, `robots.txt`, `sitemap.xml` served from `getrun.dev`
-- **Current version** — **0.3.6** (`Cargo.toml`)
+- **Current version** — **0.3.7** (`Cargo.toml`)
 
 Early software — works end-to-end on macOS, tested on Linux.
 
