@@ -8,3 +8,5 @@ rundev-macos-x86_64
 rundev-linux-x86_64
 rundev-linux-aarch64
 Cross.toml
+# graphify knowledge graph (generated, rebuilt automatically)
+graphify-out/
