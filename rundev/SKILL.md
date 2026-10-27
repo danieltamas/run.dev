@@ -129,7 +129,7 @@ rundev uninstall            # Reverse all system changes
 | `x` | Stop selected service |
 | `r` | Restart selected service |
 | `p` | Pause routing (process keeps running, domain points to production) |
-| `t` | Open shell at service directory |
+| `t` | Open shell at service directory, with the service env (.env + YAML + Cloak secrets) |
 | `f` | Auto-fix crashed service (kill port, restart, etc.) |
 | `l` | Toggle log panel |
 | `c` / `y` | Copy the selected service's logs to the clipboard |

@@ -251,23 +251,9 @@ pub async fn spawn_process(proc: SharedProcess) -> Result<()> {
     full_env.entry("NODE_TLS_REJECT_UNAUTHORIZED".to_string())
         .or_insert_with(|| "0".to_string());
 
-    // Collect env vars to inject at runtime.
-    // Sources (in priority order, later wins):
-    //   1. .env files from the service's working directory (always loaded)
-    //   2. ServiceConfig.env from rundev YAML config
-    //   3. Cloak vault secrets override on top (if available)
-    let mut inject_env = load_dotenv(&working_dir);
-    inject_env.extend(env.clone());
-    if let Some(cloak_dir) = find_cloak_root(&working_dir) {
-        match cloak_export(&cloak_dir) {
-            Ok(cloak_vars) => {
-                inject_env.extend(cloak_vars);
-            }
-            Err(_) => {
-                // Cloak failed — .env values are already loaded, just continue.
-            }
-        }
-    }
+    // Cloak failure is tolerated here: .env values are already loaded and a
+    // background service has no terminal to report to.
+    let inject_env = resolve_service_env(&working_dir, &env).unwrap_or_else(|(vars, _)| vars);
 
     // Always inject into process env — this covers Bun, Go, Python, Rust,
     // and any runtime that respects process env over .env files.
@@ -697,6 +683,28 @@ fn load_dotenv(dir: &std::path::Path) -> HashMap<String, String> {
     vars
 }
 
+/// The env a service (or a `[t]` shell in its directory) runs with.
+/// Sources, later wins:
+///   1. .env files from the working directory (always loaded)
+///   2. ServiceConfig.env from the rundev YAML
+///   3. Cloak vault secrets (when a `.cloak` marker is found above the directory)
+/// On a Cloak failure the dotenv + YAML vars are returned with the error so the
+/// caller can decide whether to surface it.
+pub fn resolve_service_env(
+    working_dir: &std::path::Path,
+    config_env: &HashMap<String, String>,
+) -> std::result::Result<HashMap<String, String>, (HashMap<String, String>, anyhow::Error)> {
+    let mut vars = load_dotenv(working_dir);
+    vars.extend(config_env.clone());
+    if let Some(cloak_dir) = find_cloak_root(working_dir) {
+        match cloak_export(&cloak_dir) {
+            Ok(cloak_vars) => vars.extend(cloak_vars),
+            Err(e) => return Err((vars, e)),
+        }
+    }
+    Ok(vars)
+}
+
 /// Walk up from `start` to find the nearest directory containing a `.cloak` marker.
 fn find_cloak_root(start: &std::path::Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
@@ -1001,6 +1009,20 @@ mod tests {
     }
 
     // ── find_cloak_root ─────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_service_env_merges_dotenv_under_config() {
+        let dir = std::env::temp_dir().join(format!("rundev_env_test_{}", timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "A=1\nB=\"from-dotenv\"\n# comment\n").unwrap();
+        let config: HashMap<String, String> = [("B".to_string(), "from-yaml".to_string())].into();
+
+        // No .cloak above the temp dir, so this is the dotenv + YAML path only.
+        let vars = resolve_service_env(&dir, &config).unwrap();
+        assert_eq!(vars.get("A").map(String::as_str), Some("1"));
+        assert_eq!(vars.get("B").map(String::as_str), Some("from-yaml"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn find_cloak_root_in_current_dir() {

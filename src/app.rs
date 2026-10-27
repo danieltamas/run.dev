@@ -584,9 +584,21 @@ async fn shell_out(
     crate::tui::restore()?;
 
     eprintln!(
-        "\n  \x1b[36mshell for:\x1b[0m {}  \x1b[2m(type `exit` to return to run.dev)\x1b[0m\n",
+        "\n  \x1b[36mshell for:\x1b[0m {}  \x1b[2m(type `exit` to return to run.dev)\x1b[0m",
         req.service_name
     );
+
+    // Same env the service itself runs with (.env + YAML + Cloak), so commands
+    // typed here see the real secrets instead of on-disk placeholders. Resolved
+    // after the TUI is suspended: `cloak export` may prompt for Touch ID.
+    let service_env = match crate::core::process::resolve_service_env(&req.working_dir, &req.env) {
+        Ok(vars) => vars,
+        Err((vars, e)) => {
+            eprintln!("  \x1b[33mwarning:\x1b[0m Cloak secrets not loaded ({}); using .env as-is", e);
+            vars
+        }
+    };
+    eprintln!();
 
     // Spawn interactive shell with a custom prompt so the user always
     // knows they're inside a run.dev sub-shell.
@@ -646,7 +658,7 @@ async fn shell_out(
 
     let mut cmd = tokio::process::Command::new(&shell);
     cmd.current_dir(&req.working_dir)
-        .envs(&req.env)
+        .envs(&service_env)
         .envs(extra_env.clone())
         .args(&shell_args)
         .stdin(std::process::Stdio::inherit())

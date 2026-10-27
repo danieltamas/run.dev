@@ -73,7 +73,7 @@ run.dev/
 |------|------|---------|
 | `AppState` | `app.rs` | Central state — projects, selection, wizard, mood, flags, `shell_out_request` |
 | `ProjectView` | `app.rs` | A loaded project with its processes and crash info |
-| `ShellOutRequest` | `app.rs` | Carries working dir + env for `[t]` shell-out — suspends TUI, opens `$SHELL` |
+| `ShellOutRequest` | `app.rs` | Carries working dir + YAML env for `[t]` shell-out — suspends TUI, resolves the service env (`resolve_service_env`: .env + YAML + Cloak, same as `spawn_process`), opens `$SHELL` |
 | `WizardState` | `app.rs` | Enum — multi-step creation/rename flow |
 | `ManagedProcess` | `core/process.rs` | A running service: PID, status, logs, resources, `proxied` flag |
 | `SharedProcess` | `core/process.rs` | `Arc<Mutex<ManagedProcess>>` — shared across async tasks |
