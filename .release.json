@@ -1,0 +1,31 @@
+{
+  "branch": "main",
+  "log": "LOG.md",
+  "architecture": "src/docs/ARCHITECTURE.md",
+  "versionFiles": [
+    {"path": "Cargo.toml", "regex": "^version = \"([^\"]+)\""},
+    {"path": "Cargo.lock", "regex": "name = \"rundev\"\\nversion = \"([^\"]+)\""},
+    {"path": "AGENTS.md", "regex": "\\*\\*Current version\\*\\* — \\*\\*([0-9.]+)\\*\\*"},
+    {"path": "README.md", "regex": "badge/version-([0-9.]+)-blue"},
+    {"path": "README.md", "regex": "configured  v([0-9.]+)$"},
+    {"path": "SKILL.md", "regex": "\\*\\*Version\\*\\*: ([0-9.]+)"},
+    {"path": "rundev/SKILL.md", "regex": "^version: ([0-9.]+)"},
+    {"path": "rundev/SKILL.md", "regex": "\\*\\*Version\\*\\*: ([0-9.]+)"},
+    {"path": "src/docs/ARCHITECTURE.md", "regex": "\\*\\*Version\\*\\*: ([0-9.]+)"},
+    {"path": "index.html", "regex": "\"softwareVersion\": \"([0-9.]+)\""},
+    {"path": "index.html", "regex": "<span class=\"t-dim\">v([0-9.]+)</span>"}
+  ],
+  "test": ["cargo test --locked"],
+  "build": [
+    "cargo build --release --locked --target aarch64-apple-darwin && cp target/aarch64-apple-darwin/release/rundev rundev-macos-aarch64 && test \"$(lipo -archs rundev-macos-aarch64)\" = arm64",
+    "cargo build --release --locked --target x86_64-apple-darwin && cp target/x86_64-apple-darwin/release/rundev rundev-macos-x86_64 && test \"$(lipo -archs rundev-macos-x86_64)\" = x86_64",
+    "docker run --rm -v \"$(pwd)\":/app -w /app --platform linux/amd64 rust:1.88-slim cargo build --release --locked --target-dir /app/target/linux && cp target/linux/release/rundev rundev-linux-x86_64 && file rundev-linux-x86_64 | grep -q 'x86-64'",
+    "./rundev-macos-aarch64 --version | grep -q {version}"
+  ],
+  "assets": ["rundev-macos-aarch64", "rundev-macos-x86_64", "rundev-linux-x86_64"],
+  "githubRelease": true,
+  "verify": [
+    "curl -fsSL https://github.com/danieltamas/run.dev/releases/download/{tag}/rundev-macos-aarch64 -o \"${TMPDIR:-/tmp}/rundev-{version}\" && chmod +x \"${TMPDIR:-/tmp}/rundev-{version}\" && \"${TMPDIR:-/tmp}/rundev-{version}\" --version | grep -q {version}",
+    "curl -fsSL https://github.com/danieltamas/run.dev/releases/latest/download/rundev-macos-aarch64 | cmp -s - rundev-macos-aarch64"
+  ]
+}
